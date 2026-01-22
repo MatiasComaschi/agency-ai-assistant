@@ -16,6 +16,7 @@ import {
 import { z } from 'zod';
 import { supabase } from '@/integrations/supabase/client';
 import { useCompany } from '@/contexts/CompanyContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -29,7 +30,7 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
-import type { BusinessHours, Holiday, CreateCompanyFormData } from '@/types';
+import type { DaySchedule, HolidayInput } from '@/types';
 
 const steps = [
   { id: 1, title: 'Company Basics', icon: Building2 },
@@ -60,17 +61,17 @@ const timezones = [
   'Pacific/Honolulu',
 ];
 
-const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const;
+const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-const defaultBusinessHours: BusinessHours = {
-  monday: { open: '09:00', close: '17:00', closed: false },
-  tuesday: { open: '09:00', close: '17:00', closed: false },
-  wednesday: { open: '09:00', close: '17:00', closed: false },
-  thursday: { open: '09:00', close: '17:00', closed: false },
-  friday: { open: '09:00', close: '17:00', closed: false },
-  saturday: { open: '09:00', close: '17:00', closed: true },
-  sunday: { open: '09:00', close: '17:00', closed: true },
-};
+const defaultBusinessHours: DaySchedule[] = [
+  { day_of_week: 0, open_time: '09:00', close_time: '17:00', is_closed: true },
+  { day_of_week: 1, open_time: '09:00', close_time: '17:00', is_closed: false },
+  { day_of_week: 2, open_time: '09:00', close_time: '17:00', is_closed: false },
+  { day_of_week: 3, open_time: '09:00', close_time: '17:00', is_closed: false },
+  { day_of_week: 4, open_time: '09:00', close_time: '17:00', is_closed: false },
+  { day_of_week: 5, open_time: '09:00', close_time: '17:00', is_closed: false },
+  { day_of_week: 6, open_time: '09:00', close_time: '17:00', is_closed: true },
+];
 
 const step1Schema = z.object({
   name: z.string().min(2, 'Company name is required'),
@@ -78,15 +79,29 @@ const step1Schema = z.object({
   timezone: z.string().min(1, 'Please select a timezone'),
 });
 
+interface FormData {
+  name: string;
+  industry: string;
+  timezone: string;
+  business_hours: DaySchedule[];
+  holidays: HolidayInput[];
+  primary_phone: string;
+  fallback_phone: string;
+  booking_link: string;
+  ai_tone: string;
+  ai_voice: string;
+  ai_language: string;
+}
+
 export default function CreateCompany() {
   const navigate = useNavigate();
   const { refetchCompanies, setCurrentCompanyId } = useCompany();
+  const { user } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // Form state
-  const [formData, setFormData] = useState<CreateCompanyFormData>({
+  const [formData, setFormData] = useState<FormData>({
     name: '',
     industry: '',
     timezone: 'America/New_York',
@@ -100,44 +115,31 @@ export default function CreateCompany() {
     ai_language: 'en-US',
   });
 
-  const updateField = <K extends keyof CreateCompanyFormData>(
-    key: K,
-    value: CreateCompanyFormData[K]
-  ) => {
+  const updateField = <K extends keyof FormData>(key: K, value: FormData[K]) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
     setErrors((prev) => ({ ...prev, [key]: '' }));
   };
 
-  const updateBusinessHours = (
-    day: keyof BusinessHours,
-    field: 'open' | 'close' | 'closed',
-    value: string | boolean
-  ) => {
+  const updateBusinessHours = (dayIndex: number, field: keyof DaySchedule, value: string | boolean) => {
     setFormData((prev) => ({
       ...prev,
-      business_hours: {
-        ...prev.business_hours,
-        [day]: {
-          ...prev.business_hours[day],
-          [field]: value,
-        },
-      },
+      business_hours: prev.business_hours.map((day, i) =>
+        i === dayIndex ? { ...day, [field]: value } : day
+      ),
     }));
   };
 
   const addHoliday = () => {
     setFormData((prev) => ({
       ...prev,
-      holidays: [...prev.holidays, { date: '', name: '' }],
+      holidays: [...prev.holidays, { date: '', note: '' }],
     }));
   };
 
-  const updateHoliday = (index: number, field: 'date' | 'name', value: string) => {
+  const updateHoliday = (index: number, field: 'date' | 'note', value: string) => {
     setFormData((prev) => ({
       ...prev,
-      holidays: prev.holidays.map((h, i) =>
-        i === index ? { ...h, [field]: value } : h
-      ),
+      holidays: prev.holidays.map((h, i) => (i === index ? { ...h, [field]: value } : h)),
     }));
   };
 
@@ -150,7 +152,6 @@ export default function CreateCompany() {
 
   const validateStep = (step: number): boolean => {
     setErrors({});
-
     if (step === 1) {
       const result = step1Schema.safeParse({
         name: formData.name,
@@ -160,59 +161,85 @@ export default function CreateCompany() {
       if (!result.success) {
         const fieldErrors: Record<string, string> = {};
         result.error.errors.forEach((err) => {
-          if (err.path[0]) {
-            fieldErrors[String(err.path[0])] = err.message;
-          }
+          if (err.path[0]) fieldErrors[String(err.path[0])] = err.message;
         });
         setErrors(fieldErrors);
         return false;
       }
     }
-
     return true;
   };
 
   const nextStep = () => {
-    if (validateStep(currentStep)) {
-      setCurrentStep((prev) => Math.min(prev + 1, 4));
-    }
+    if (validateStep(currentStep)) setCurrentStep((prev) => Math.min(prev + 1, 4));
   };
 
-  const prevStep = () => {
-    setCurrentStep((prev) => Math.max(prev - 1, 1));
-  };
+  const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 1));
 
   const handleSubmit = async () => {
-    if (!validateStep(currentStep)) return;
+    if (!validateStep(currentStep) || !user) return;
 
     setIsSubmitting(true);
 
     try {
-      const insertData = {
-        name: formData.name,
-        industry: formData.industry,
-        timezone: formData.timezone,
-        business_hours: formData.business_hours as unknown as Record<string, unknown>,
-        holidays: formData.holidays.filter((h) => h.date && h.name) as unknown as Record<string, unknown>[],
-        primary_phone: formData.primary_phone || null,
-        fallback_phone: formData.fallback_phone || null,
-        booking_link: formData.booking_link || null,
-        ai_tone: formData.ai_tone,
-        ai_voice: formData.ai_voice,
-        ai_language: formData.ai_language,
-      };
-
-      const { data, error } = await supabase
+      // 1. Create company
+      const { data: companyData, error: companyError } = await supabase
         .from('companies')
-        .insert(insertData)
+        .insert({
+          name: formData.name,
+          industry: formData.industry,
+          timezone: formData.timezone,
+          primary_phone: formData.primary_phone || null,
+          fallback_phone: formData.fallback_phone || null,
+          booking_link: formData.booking_link || null,
+        })
         .select()
         .single();
 
-      if (error) throw error;
+      if (companyError) throw companyError;
+
+      const companyId = companyData.id;
+
+      // 2. Create membership for current user as agency_admin
+      await supabase.from('memberships').insert({
+        user_id: user.id,
+        company_id: companyId,
+        role: 'agency_admin',
+      });
+
+      // 3. Create business hours
+      const hoursInserts = formData.business_hours.map((day) => ({
+        company_id: companyId,
+        day_of_week: day.day_of_week,
+        open_time: day.open_time,
+        close_time: day.close_time,
+        is_closed: day.is_closed,
+      }));
+      await supabase.from('company_hours').insert(hoursInserts);
+
+      // 4. Create holidays
+      const validHolidays = formData.holidays.filter((h) => h.date);
+      if (validHolidays.length > 0) {
+        const holidayInserts = validHolidays.map((h) => ({
+          company_id: companyId,
+          date: h.date,
+          note: h.note || null,
+          is_closed: true,
+        }));
+        await supabase.from('company_holidays').insert(holidayInserts);
+      }
+
+      // 5. Create AI profile
+      await supabase.from('ai_profiles').insert({
+        company_id: companyId,
+        tone: formData.ai_tone,
+        language: formData.ai_language,
+        voice_id: formData.ai_voice,
+      });
 
       toast.success('Company created successfully!');
       await refetchCompanies();
-      setCurrentCompanyId(data.id);
+      setCurrentCompanyId(companyId);
       navigate('/company');
     } catch (error) {
       console.error('Error creating company:', error);
@@ -223,27 +250,15 @@ export default function CreateCompany() {
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="max-w-3xl mx-auto"
-    >
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="max-w-3xl mx-auto">
       {/* Header */}
       <div className="mb-8">
-        <Button
-          variant="ghost"
-          onClick={() => navigate('/agency')}
-          className="mb-4 -ml-2"
-        >
+        <Button variant="ghost" onClick={() => navigate('/agency')} className="mb-4 -ml-2">
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back to Dashboard
         </Button>
-        <h1 className="text-3xl font-display font-bold text-foreground">
-          Create New Company
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          Set up a new client company in just a few steps
-        </p>
+        <h1 className="text-3xl font-display font-bold text-foreground">Create New Company</h1>
+        <p className="text-muted-foreground mt-1">Set up a new client company in just a few steps</p>
       </div>
 
       {/* Progress Steps */}
@@ -260,11 +275,7 @@ export default function CreateCompany() {
                     : 'border-border text-muted-foreground'
                 }`}
               >
-                {currentStep > step.id ? (
-                  <Check className="h-5 w-5" />
-                ) : (
-                  <step.icon className="h-5 w-5" />
-                )}
+                {currentStep > step.id ? <Check className="h-5 w-5" /> : <step.icon className="h-5 w-5" />}
               </div>
               {index < steps.length - 1 && (
                 <div
@@ -294,132 +305,80 @@ export default function CreateCompany() {
       <Card>
         <AnimatePresence mode="wait">
           {currentStep === 1 && (
-            <motion.div
-              key="step1"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-            >
+            <motion.div key="step1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
               <CardHeader>
                 <CardTitle>Company Basics</CardTitle>
-                <CardDescription>
-                  Enter the basic information about your client's company
-                </CardDescription>
+                <CardDescription>Enter the basic information about your client's company</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="name">Company Name *</Label>
-                  <Input
-                    id="name"
-                    placeholder="Acme Dental Clinic"
-                    value={formData.name}
-                    onChange={(e) => updateField('name', e.target.value)}
-                  />
-                  {errors.name && (
-                    <p className="text-sm text-destructive">{errors.name}</p>
-                  )}
+                  <Input id="name" placeholder="Acme Dental Clinic" value={formData.name} onChange={(e) => updateField('name', e.target.value)} />
+                  {errors.name && <p className="text-sm text-destructive">{errors.name}</p>}
                 </div>
-
                 <div className="space-y-2">
                   <Label htmlFor="industry">Industry *</Label>
-                  <Select
-                    value={formData.industry}
-                    onValueChange={(value) => updateField('industry', value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select industry" />
-                    </SelectTrigger>
+                  <Select value={formData.industry} onValueChange={(value) => updateField('industry', value)}>
+                    <SelectTrigger><SelectValue placeholder="Select industry" /></SelectTrigger>
                     <SelectContent>
                       {industries.map((ind) => (
-                        <SelectItem key={ind} value={ind}>
-                          {ind}
-                        </SelectItem>
+                        <SelectItem key={ind} value={ind}>{ind}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  {errors.industry && (
-                    <p className="text-sm text-destructive">{errors.industry}</p>
-                  )}
+                  {errors.industry && <p className="text-sm text-destructive">{errors.industry}</p>}
                 </div>
-
                 <div className="space-y-2">
                   <Label htmlFor="timezone">Timezone *</Label>
-                  <Select
-                    value={formData.timezone}
-                    onValueChange={(value) => updateField('timezone', value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select timezone" />
-                    </SelectTrigger>
+                  <Select value={formData.timezone} onValueChange={(value) => updateField('timezone', value)}>
+                    <SelectTrigger><SelectValue placeholder="Select timezone" /></SelectTrigger>
                     <SelectContent>
                       {timezones.map((tz) => (
-                        <SelectItem key={tz} value={tz}>
-                          {tz.replace('_', ' ')}
-                        </SelectItem>
+                        <SelectItem key={tz} value={tz}>{tz.replace('_', ' ')}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  {errors.timezone && (
-                    <p className="text-sm text-destructive">{errors.timezone}</p>
-                  )}
+                  {errors.timezone && <p className="text-sm text-destructive">{errors.timezone}</p>}
                 </div>
               </CardContent>
             </motion.div>
           )}
 
           {currentStep === 2 && (
-            <motion.div
-              key="step2"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-            >
+            <motion.div key="step2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
               <CardHeader>
                 <CardTitle>Business Hours</CardTitle>
-                <CardDescription>
-                  Set the weekly schedule and any holidays
-                </CardDescription>
+                <CardDescription>Set the weekly schedule and any holidays</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="space-y-3">
-                  {days.map((day) => (
-                    <div
-                      key={day}
-                      className="flex items-center justify-between gap-4 p-3 bg-muted/50 rounded-lg"
-                    >
+                  {formData.business_hours.map((day, index) => (
+                    <div key={day.day_of_week} className="flex items-center justify-between gap-4 p-3 bg-muted/50 rounded-lg">
                       <div className="flex items-center gap-3 min-w-[120px]">
                         <Switch
-                          checked={!formData.business_hours[day].closed}
-                          onCheckedChange={(checked) =>
-                            updateBusinessHours(day, 'closed', !checked)
-                          }
+                          checked={!day.is_closed}
+                          onCheckedChange={(checked) => updateBusinessHours(index, 'is_closed', !checked)}
                         />
-                        <span className="font-medium capitalize">{day}</span>
+                        <span className="font-medium">{dayNames[day.day_of_week]}</span>
                       </div>
-                      {!formData.business_hours[day].closed && (
+                      {!day.is_closed && (
                         <div className="flex items-center gap-2">
                           <Input
                             type="time"
-                            value={formData.business_hours[day].open}
-                            onChange={(e) =>
-                              updateBusinessHours(day, 'open', e.target.value)
-                            }
+                            value={day.open_time}
+                            onChange={(e) => updateBusinessHours(index, 'open_time', e.target.value)}
                             className="w-32"
                           />
                           <span className="text-muted-foreground">to</span>
                           <Input
                             type="time"
-                            value={formData.business_hours[day].close}
-                            onChange={(e) =>
-                              updateBusinessHours(day, 'close', e.target.value)
-                            }
+                            value={day.close_time}
+                            onChange={(e) => updateBusinessHours(index, 'close_time', e.target.value)}
                             className="w-32"
                           />
                         </div>
                       )}
-                      {formData.business_hours[day].closed && (
-                        <span className="text-muted-foreground">Closed</span>
-                      )}
+                      {day.is_closed && <span className="text-muted-foreground">Closed</span>}
                     </div>
                   ))}
                 </div>
@@ -442,15 +401,11 @@ export default function CreateCompany() {
                       />
                       <Input
                         placeholder="Holiday name"
-                        value={holiday.name}
-                        onChange={(e) => updateHoliday(index, 'name', e.target.value)}
+                        value={holiday.note}
+                        onChange={(e) => updateHoliday(index, 'note', e.target.value)}
                         className="flex-1"
                       />
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => removeHoliday(index)}
-                      >
+                      <Button variant="ghost" size="icon" onClick={() => removeHoliday(index)}>
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
                     </div>
@@ -461,17 +416,10 @@ export default function CreateCompany() {
           )}
 
           {currentStep === 3 && (
-            <motion.div
-              key="step3"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-            >
+            <motion.div key="step3" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
               <CardHeader>
                 <CardTitle>Contact Routing</CardTitle>
-                <CardDescription>
-                  Configure how calls should be routed and escalated
-                </CardDescription>
+                <CardDescription>Configure how calls should be routed and escalated</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
@@ -483,11 +431,8 @@ export default function CreateCompany() {
                     value={formData.primary_phone}
                     onChange={(e) => updateField('primary_phone', e.target.value)}
                   />
-                  <p className="text-xs text-muted-foreground">
-                    The main number for escalations
-                  </p>
+                  <p className="text-xs text-muted-foreground">The main number for escalations</p>
                 </div>
-
                 <div className="space-y-2">
                   <Label htmlFor="fallback_phone">Fallback Phone Number</Label>
                   <Input
@@ -497,11 +442,8 @@ export default function CreateCompany() {
                     value={formData.fallback_phone}
                     onChange={(e) => updateField('fallback_phone', e.target.value)}
                   />
-                  <p className="text-xs text-muted-foreground">
-                    Used when primary is unavailable
-                  </p>
+                  <p className="text-xs text-muted-foreground">Used if primary is unavailable</p>
                 </div>
-
                 <div className="space-y-2">
                   <Label htmlFor="booking_link">Booking Link</Label>
                   <Input
@@ -511,71 +453,45 @@ export default function CreateCompany() {
                     value={formData.booking_link}
                     onChange={(e) => updateField('booking_link', e.target.value)}
                   />
-                  <p className="text-xs text-muted-foreground">
-                    Link to your online booking system
-                  </p>
+                  <p className="text-xs text-muted-foreground">For AI-assisted appointment booking</p>
                 </div>
               </CardContent>
             </motion.div>
           )}
 
           {currentStep === 4 && (
-            <motion.div
-              key="step4"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-            >
+            <motion.div key="step4" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
               <CardHeader>
-                <CardTitle>AI Receptionist Preset</CardTitle>
-                <CardDescription>
-                  Configure the personality and voice of your AI receptionist
-                </CardDescription>
+                <CardTitle>AI Preset</CardTitle>
+                <CardDescription>Configure the AI receptionist defaults</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="ai_tone">Conversation Tone</Label>
-                  <Select
-                    value={formData.ai_tone}
-                    onValueChange={(value) => updateField('ai_tone', value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
+                  <Label>Tone</Label>
+                  <Select value={formData.ai_tone} onValueChange={(value) => updateField('ai_tone', value)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="professional">Professional</SelectItem>
                       <SelectItem value="friendly">Friendly</SelectItem>
-                      <SelectItem value="casual">Casual</SelectItem>
                       <SelectItem value="formal">Formal</SelectItem>
+                      <SelectItem value="casual">Casual</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-
                 <div className="space-y-2">
-                  <Label htmlFor="ai_voice">Voice</Label>
-                  <Select
-                    value={formData.ai_voice}
-                    onValueChange={(value) => updateField('ai_voice', value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
+                  <Label>Voice</Label>
+                  <Select value={formData.ai_voice} onValueChange={(value) => updateField('ai_voice', value)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="female">Female</SelectItem>
                       <SelectItem value="male">Male</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-
                 <div className="space-y-2">
-                  <Label htmlFor="ai_language">Language</Label>
-                  <Select
-                    value={formData.ai_language}
-                    onValueChange={(value) => updateField('ai_language', value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
+                  <Label>Language</Label>
+                  <Select value={formData.ai_language} onValueChange={(value) => updateField('ai_language', value)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="en-US">English (US)</SelectItem>
                       <SelectItem value="en-GB">English (UK)</SelectItem>
@@ -584,26 +500,14 @@ export default function CreateCompany() {
                     </SelectContent>
                   </Select>
                 </div>
-
-                <div className="mt-6 p-4 bg-muted/50 rounded-lg">
-                  <h4 className="font-medium mb-2">Preview</h4>
-                  <p className="text-sm text-muted-foreground italic">
-                    "Hello! Thank you for calling {formData.name || '[Company Name]'}. How may I
-                    help you today?"
-                  </p>
-                </div>
               </CardContent>
             </motion.div>
           )}
         </AnimatePresence>
 
         {/* Navigation Buttons */}
-        <div className="flex justify-between p-6 pt-0">
-          <Button
-            variant="outline"
-            onClick={prevStep}
-            disabled={currentStep === 1}
-          >
+        <CardContent className="flex justify-between pt-6 border-t">
+          <Button variant="outline" onClick={prevStep} disabled={currentStep === 1}>
             <ArrowLeft className="h-4 w-4 mr-2" />
             Previous
           </Button>
@@ -613,20 +517,21 @@ export default function CreateCompany() {
               <ArrowRight className="h-4 w-4 ml-2" />
             </Button>
           ) : (
-            <Button
-              onClick={handleSubmit}
-              disabled={isSubmitting}
-              className="bg-accent hover:bg-accent/90"
-            >
+            <Button onClick={handleSubmit} disabled={isSubmitting} className="bg-accent hover:bg-accent/90">
               {isSubmitting ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Creating...
+                </>
               ) : (
-                <Check className="h-4 w-4 mr-2" />
+                <>
+                  <Check className="h-4 w-4 mr-2" />
+                  Create Company
+                </>
               )}
-              Create Company
             </Button>
           )}
-        </div>
+        </CardContent>
       </Card>
     </motion.div>
   );

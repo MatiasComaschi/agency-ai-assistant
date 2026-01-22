@@ -14,58 +14,149 @@ export type Database = {
   }
   public: {
     Tables: {
-      call_logs: {
+      ai_profiles: {
         Row: {
-          booked: boolean | null
-          caller_name: string | null
-          caller_phone: string | null
+          after_hours_script: string | null
+          allowed_actions_json: Json | null
+          company_id: string
+          disclosure_script: string | null
+          escalation_rules_json: Json | null
+          greeting_script: string | null
+          id: string
+          language: string | null
+          system_prompt: string | null
+          tone: string | null
+          updated_at: string
+          voice_id: string | null
+        }
+        Insert: {
+          after_hours_script?: string | null
+          allowed_actions_json?: Json | null
+          company_id: string
+          disclosure_script?: string | null
+          escalation_rules_json?: Json | null
+          greeting_script?: string | null
+          id?: string
+          language?: string | null
+          system_prompt?: string | null
+          tone?: string | null
+          updated_at?: string
+          voice_id?: string | null
+        }
+        Update: {
+          after_hours_script?: string | null
+          allowed_actions_json?: Json | null
+          company_id?: string
+          disclosure_script?: string | null
+          escalation_rules_json?: Json | null
+          greeting_script?: string | null
+          id?: string
+          language?: string | null
+          system_prompt?: string | null
+          tone?: string | null
+          updated_at?: string
+          voice_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_profiles_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      audits: {
+        Row: {
+          action: string
+          actor_user_id: string
           company_id: string
           created_at: string
-          duration_seconds: number | null
-          escalated: boolean | null
-          extracted_fields: Json | null
+          entity_id: string | null
+          entity_type: string
           id: string
-          intent: string | null
+          metadata: Json | null
+        }
+        Insert: {
+          action: string
+          actor_user_id: string
+          company_id: string
+          created_at?: string
+          entity_id?: string | null
+          entity_type: string
+          id?: string
+          metadata?: Json | null
+        }
+        Update: {
+          action?: string
+          actor_user_id?: string
+          company_id?: string
+          created_at?: string
+          entity_id?: string | null
+          entity_type?: string
+          id?: string
+          metadata?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "audits_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      calls: {
+        Row: {
+          caller_name: string | null
+          caller_number: string | null
+          company_id: string
+          cost_cents: number | null
+          ended_at: string | null
+          extracted_json: Json | null
+          id: string
           internal_notes: string | null
           outcome: string | null
+          recording_url: string | null
+          started_at: string
           summary: string | null
           transcript: string | null
         }
         Insert: {
-          booked?: boolean | null
           caller_name?: string | null
-          caller_phone?: string | null
+          caller_number?: string | null
           company_id: string
-          created_at?: string
-          duration_seconds?: number | null
-          escalated?: boolean | null
-          extracted_fields?: Json | null
+          cost_cents?: number | null
+          ended_at?: string | null
+          extracted_json?: Json | null
           id?: string
-          intent?: string | null
           internal_notes?: string | null
           outcome?: string | null
+          recording_url?: string | null
+          started_at?: string
           summary?: string | null
           transcript?: string | null
         }
         Update: {
-          booked?: boolean | null
           caller_name?: string | null
-          caller_phone?: string | null
+          caller_number?: string | null
           company_id?: string
-          created_at?: string
-          duration_seconds?: number | null
-          escalated?: boolean | null
-          extracted_fields?: Json | null
+          cost_cents?: number | null
+          ended_at?: string | null
+          extracted_json?: Json | null
           id?: string
-          intent?: string | null
           internal_notes?: string | null
           outcome?: string | null
+          recording_url?: string | null
+          started_at?: string
           summary?: string | null
           transcript?: string | null
         }
         Relationships: [
           {
-            foreignKeyName: "call_logs_company_id_fkey"
+            foreignKeyName: "calls_company_id_fkey"
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
@@ -75,116 +166,71 @@ export type Database = {
       }
       companies: {
         Row: {
-          after_hours_behavior: string | null
-          after_hours_message: string | null
-          ai_allow_booking: boolean | null
-          ai_allow_escalate: boolean | null
-          ai_allow_faq: boolean | null
-          ai_allow_quote: boolean | null
-          ai_allow_reschedule: boolean | null
-          ai_disclosure: string | null
-          ai_greeting: string | null
-          ai_language: string | null
-          ai_persona_prompt: string | null
-          ai_tone: string | null
-          ai_voice: string | null
           booking_link: string | null
-          business_hours: Json | null
           created_at: string
-          escalation_rules: Json | null
           fallback_phone: string | null
-          holidays: Json | null
           id: string
           industry: string | null
           name: string
           primary_phone: string | null
           status: string
           timezone: string
+          twilio_number: string | null
           updated_at: string
         }
         Insert: {
-          after_hours_behavior?: string | null
-          after_hours_message?: string | null
-          ai_allow_booking?: boolean | null
-          ai_allow_escalate?: boolean | null
-          ai_allow_faq?: boolean | null
-          ai_allow_quote?: boolean | null
-          ai_allow_reschedule?: boolean | null
-          ai_disclosure?: string | null
-          ai_greeting?: string | null
-          ai_language?: string | null
-          ai_persona_prompt?: string | null
-          ai_tone?: string | null
-          ai_voice?: string | null
           booking_link?: string | null
-          business_hours?: Json | null
           created_at?: string
-          escalation_rules?: Json | null
           fallback_phone?: string | null
-          holidays?: Json | null
           id?: string
           industry?: string | null
           name: string
           primary_phone?: string | null
           status?: string
           timezone?: string
+          twilio_number?: string | null
           updated_at?: string
         }
         Update: {
-          after_hours_behavior?: string | null
-          after_hours_message?: string | null
-          ai_allow_booking?: boolean | null
-          ai_allow_escalate?: boolean | null
-          ai_allow_faq?: boolean | null
-          ai_allow_quote?: boolean | null
-          ai_allow_reschedule?: boolean | null
-          ai_disclosure?: string | null
-          ai_greeting?: string | null
-          ai_language?: string | null
-          ai_persona_prompt?: string | null
-          ai_tone?: string | null
-          ai_voice?: string | null
           booking_link?: string | null
-          business_hours?: Json | null
           created_at?: string
-          escalation_rules?: Json | null
           fallback_phone?: string | null
-          holidays?: Json | null
           id?: string
           industry?: string | null
           name?: string
           primary_phone?: string | null
           status?: string
           timezone?: string
+          twilio_number?: string | null
           updated_at?: string
         }
         Relationships: []
       }
-      company_members: {
+      company_holidays: {
         Row: {
           company_id: string
-          created_at: string
+          date: string
           id: string
-          role: Database["public"]["Enums"]["app_role"]
-          user_id: string
+          is_closed: boolean
+          note: string | null
         }
         Insert: {
           company_id: string
-          created_at?: string
+          date: string
           id?: string
-          role?: Database["public"]["Enums"]["app_role"]
-          user_id: string
+          is_closed?: boolean
+          note?: string | null
         }
         Update: {
           company_id?: string
-          created_at?: string
+          date?: string
           id?: string
-          role?: Database["public"]["Enums"]["app_role"]
-          user_id?: string
+          is_closed?: boolean
+          note?: string | null
         }
         Relationships: [
           {
-            foreignKeyName: "company_members_company_id_fkey"
+            foreignKeyName: "company_holidays_company_id_fkey"
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
@@ -192,32 +238,124 @@ export type Database = {
           },
         ]
       }
-      knowledge_base: {
+      company_hours: {
         Row: {
+          close_time: string
           company_id: string
-          content: string
+          day_of_week: number
+          id: string
+          is_closed: boolean
+          open_time: string
+        }
+        Insert: {
+          close_time?: string
+          company_id: string
+          day_of_week: number
+          id?: string
+          is_closed?: boolean
+          open_time?: string
+        }
+        Update: {
+          close_time?: string
+          company_id?: string
+          day_of_week?: number
+          id?: string
+          is_closed?: boolean
+          open_time?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_hours_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      followup_tasks: {
+        Row: {
+          assigned_to: string | null
+          call_id: string | null
+          company_id: string
+          created_at: string
+          due_at: string | null
+          id: string
+          notes: string | null
+          status: string
+          title: string
+        }
+        Insert: {
+          assigned_to?: string | null
+          call_id?: string | null
+          company_id: string
+          created_at?: string
+          due_at?: string | null
+          id?: string
+          notes?: string | null
+          status?: string
+          title: string
+        }
+        Update: {
+          assigned_to?: string | null
+          call_id?: string | null
+          company_id?: string
+          created_at?: string
+          due_at?: string | null
+          id?: string
+          notes?: string | null
+          status?: string
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "followup_tasks_call_id_fkey"
+            columns: ["call_id"]
+            isOneToOne: false
+            referencedRelation: "calls"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "followup_tasks_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      knowledge_base_items: {
+        Row: {
+          answer: string
+          company_id: string
           created_at: string
           id: string
+          is_active: boolean
+          question: string | null
           tags: string[] | null
           title: string
           type: string
           updated_at: string
         }
         Insert: {
+          answer: string
           company_id: string
-          content: string
           created_at?: string
           id?: string
+          is_active?: boolean
+          question?: string | null
           tags?: string[] | null
           title: string
-          type: string
+          type?: string
           updated_at?: string
         }
         Update: {
+          answer?: string
           company_id?: string
-          content?: string
           created_at?: string
           id?: string
+          is_active?: boolean
+          question?: string | null
           tags?: string[] | null
           title?: string
           type?: string
@@ -225,7 +363,39 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "knowledge_base_company_id_fkey"
+            foreignKeyName: "knowledge_base_items_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      memberships: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          role: string
+          user_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          role?: string
+          user_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          role?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "memberships_company_id_fkey"
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
@@ -260,47 +430,6 @@ export type Database = {
         }
         Relationships: []
       }
-      team_invitations: {
-        Row: {
-          accepted: boolean | null
-          company_id: string
-          created_at: string
-          email: string
-          expires_at: string
-          id: string
-          invited_by: string | null
-          role: Database["public"]["Enums"]["app_role"]
-        }
-        Insert: {
-          accepted?: boolean | null
-          company_id: string
-          created_at?: string
-          email: string
-          expires_at?: string
-          id?: string
-          invited_by?: string | null
-          role?: Database["public"]["Enums"]["app_role"]
-        }
-        Update: {
-          accepted?: boolean | null
-          company_id?: string
-          created_at?: string
-          email?: string
-          expires_at?: string
-          id?: string
-          invited_by?: string | null
-          role?: Database["public"]["Enums"]["app_role"]
-        }
-        Relationships: [
-          {
-            foreignKeyName: "team_invitations_company_id_fkey"
-            columns: ["company_id"]
-            isOneToOne: false
-            referencedRelation: "companies"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       user_roles: {
         Row: {
           created_at: string
@@ -327,6 +456,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_user_role_in_company: {
+        Args: { _company_id: string; _user_id: string }
+        Returns: string
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -334,7 +467,12 @@ export type Database = {
         }
         Returns: boolean
       }
+      is_agency_admin: { Args: { _user_id: string }; Returns: boolean }
       is_company_member: {
+        Args: { _company_id: string; _user_id: string }
+        Returns: boolean
+      }
+      is_member_of_company: {
         Args: { _company_id: string; _user_id: string }
         Returns: boolean
       }
