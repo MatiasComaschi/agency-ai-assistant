@@ -1,16 +1,18 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Phone, Calendar, CreditCard, Scissors, Clock, Check, X, RefreshCw, Loader2, ExternalLink, Zap } from 'lucide-react';
+import { Phone, Calendar, CreditCard, Scissors, Clock, Check, X, RefreshCw, Loader2, ExternalLink, Zap, Settings } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useCompany } from '@/contexts/CompanyContext';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { formatDistanceToNow } from 'date-fns';
+import TwilioSettings from '@/components/integrations/TwilioSettings';
 
 import type { Json } from '@/integrations/supabase/types';
 
@@ -100,10 +102,11 @@ const providers: ProviderConfig[] = [
 ];
 
 export default function Integrations() {
-  const { currentCompany } = useCompany();
+  const { currentCompany, refetchCompanies } = useCompany();
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [loading, setLoading] = useState(true);
   const [connectDialogOpen, setConnectDialogOpen] = useState(false);
+  const [twilioSettingsOpen, setTwilioSettingsOpen] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<ProviderConfig | null>(null);
   const [credentials, setCredentials] = useState<Record<string, string>>({});
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -302,7 +305,7 @@ export default function Integrations() {
                     <div className="flex items-center gap-2">
                       <CardTitle className="text-lg">{provider.name}</CardTitle>
                       {isConnected ? (
-                        <Badge variant="outline" className="bg-green-500/10 text-green-600 border-green-200">
+                        <Badge variant="outline" className="bg-success-muted text-success-muted-foreground border-success/20">
                           <Check className="h-3 w-3 mr-1" />
                           Connected
                         </Badge>
@@ -331,6 +334,16 @@ export default function Integrations() {
                   <div className="flex flex-wrap gap-2">
                     {isConnected ? (
                       <>
+                        {provider.id === 'twilio' && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setTwilioSettingsOpen(true)}
+                          >
+                            <Settings className="h-4 w-4 mr-1" />
+                            Configure
+                          </Button>
+                        )}
                         <Button
                           variant="outline"
                           size="sm"
@@ -433,6 +446,32 @@ export default function Integrations() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Twilio Settings Sheet */}
+      {currentCompany && (
+        <Sheet open={twilioSettingsOpen} onOpenChange={setTwilioSettingsOpen}>
+          <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
+            <SheetHeader>
+              <SheetTitle className="flex items-center gap-2">
+                <Phone className="h-5 w-5" />
+                Twilio Settings
+              </SheetTitle>
+              <SheetDescription>
+                Configure phone routing, recording, and call handling for {currentCompany.name}
+              </SheetDescription>
+            </SheetHeader>
+            <div className="mt-6">
+              <TwilioSettings
+                company={currentCompany}
+                onUpdate={() => {
+                  refetchCompanies();
+                  fetchIntegrations();
+                }}
+              />
+            </div>
+          </SheetContent>
+        </Sheet>
+      )}
     </motion.div>
   );
 }
