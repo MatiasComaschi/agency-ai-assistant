@@ -8,9 +8,9 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import type { AIProfile, AllowedActions, EscalationRules } from '@/types';
+import type { Json } from '@/integrations/supabase/types';
+import type { AIProfile, AllowedActions } from '@/types';
 
 export default function AIReceptionist() {
   const { currentCompany } = useCompany();
@@ -68,12 +68,15 @@ export default function AIReceptionist() {
   const handleSave = async (section: string) => {
     setIsSaving(true);
     
+    // Cast to Json type for Supabase compatibility
+    const actionsAsJson = JSON.parse(JSON.stringify(allowedActions)) as Json;
+    
     const updateData = {
       greeting_script: greeting,
       disclosure_script: disclosure,
       system_prompt: systemPrompt,
       after_hours_script: afterHoursScript,
-      allowed_actions_json: allowedActions as unknown as Record<string, unknown>,
+      allowed_actions_json: actionsAsJson,
     };
 
     let error;
