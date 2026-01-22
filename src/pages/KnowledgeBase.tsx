@@ -19,7 +19,7 @@ export default function KnowledgeBase() {
   const [items, setItems] = useState<KnowledgeBaseItem[]>([]);
   const [search, setSearch] = useState('');
   const [isOpen, setIsOpen] = useState(false);
-  const [newItem, setNewItem] = useState({ type: 'faq', title: '', content: '' });
+  const [newItem, setNewItem] = useState({ type: 'faq', title: '', answer: '', question: '' });
 
   useEffect(() => {
     if (currentCompany) fetchItems();
@@ -27,35 +27,37 @@ export default function KnowledgeBase() {
 
   const fetchItems = async () => {
     const { data } = await supabase
-      .from('knowledge_base')
+      .from('knowledge_base_items')
       .select('*')
       .eq('company_id', currentCompany!.id)
+      .eq('is_active', true)
       .order('created_at', { ascending: false });
-    setItems((data as KnowledgeBaseItem[]) || []);
+    setItems((data as unknown as KnowledgeBaseItem[]) || []);
   };
 
   const handleAdd = async () => {
-    if (!newItem.title || !newItem.content) {
-      toast.error('Please fill in all fields');
+    if (!newItem.title || !newItem.answer) {
+      toast.error('Please fill in all required fields');
       return;
     }
-    const { error } = await supabase.from('knowledge_base').insert({
+    const { error } = await supabase.from('knowledge_base_items').insert({
       company_id: currentCompany!.id,
       type: newItem.type,
       title: newItem.title,
-      content: newItem.content,
+      answer: newItem.answer,
+      question: newItem.question || null,
     });
     if (error) toast.error('Failed to add item');
     else {
       toast.success('Item added');
       setIsOpen(false);
-      setNewItem({ type: 'faq', title: '', content: '' });
+      setNewItem({ type: 'faq', title: '', answer: '', question: '' });
       fetchItems();
     }
   };
 
   const handleDelete = async (id: string) => {
-    const { error } = await supabase.from('knowledge_base').delete().eq('id', id);
+    const { error } = await supabase.from('knowledge_base_items').delete().eq('id', id);
     if (error) toast.error('Failed to delete');
     else {
       toast.success('Item deleted');
@@ -86,14 +88,17 @@ export default function KnowledgeBase() {
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="faq">FAQ</SelectItem>
-                    <SelectItem value="service">Service</SelectItem>
+                    <SelectItem value="services">Services</SelectItem>
                     <SelectItem value="pricing">Pricing</SelectItem>
-                    <SelectItem value="policy">Policy</SelectItem>
+                    <SelectItem value="policies">Policies</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div><Label>Title</Label><Input value={newItem.title} onChange={(e) => setNewItem({ ...newItem, title: e.target.value })} /></div>
-              <div><Label>Content</Label><Textarea value={newItem.content} onChange={(e) => setNewItem({ ...newItem, content: e.target.value })} rows={4} /></div>
+              {newItem.type === 'faq' && (
+                <div><Label>Question</Label><Input value={newItem.question} onChange={(e) => setNewItem({ ...newItem, question: e.target.value })} /></div>
+              )}
+              <div><Label>Answer / Content</Label><Textarea value={newItem.answer} onChange={(e) => setNewItem({ ...newItem, answer: e.target.value })} rows={4} /></div>
               <Button onClick={handleAdd} className="w-full bg-accent hover:bg-accent/90">Add Item</Button>
             </div>
           </DialogContent>
@@ -120,7 +125,7 @@ export default function KnowledgeBase() {
                     <Badge variant="secondary">{item.type}</Badge>
                     <span className="font-medium">{item.title}</span>
                   </div>
-                  <p className="text-sm text-muted-foreground line-clamp-2">{item.content}</p>
+                  <p className="text-sm text-muted-foreground line-clamp-2">{item.answer}</p>
                 </div>
                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <Button variant="ghost" size="icon"><Pencil className="h-4 w-4" /></Button>
