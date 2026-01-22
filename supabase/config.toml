@@ -2,3 +2,6 @@ project_id = "rlwbztjdfmndagnenwog"
 
 [functions.ai-simulator]
 verify_jwt = false
+
+[functions.integrations]
+verify_jwt = false
