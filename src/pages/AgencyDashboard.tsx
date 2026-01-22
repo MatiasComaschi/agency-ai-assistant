@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -12,11 +12,14 @@ import {
   Trash2,
   Building2,
   Play,
+  Loader2,
+  X,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Table,
   TableBody,
@@ -39,6 +42,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { supabase } from '@/integrations/supabase/client';
@@ -57,6 +75,13 @@ const industries = [
   'Professional Services',
 ];
 
+const timezones = [
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+];
+
 const statusColors = {
   active: 'bg-accent text-accent-foreground',
   paused: 'bg-warning text-warning-foreground',
@@ -70,6 +95,16 @@ export default function AgencyDashboard() {
   const [searchQuery, setSearchQuery] = useState('');
   const [industryFilter, setIndustryFilter] = useState('All Industries');
   const [statusFilter, setStatusFilter] = useState('all');
+  
+  // Edit modal state
+  const [editingCompany, setEditingCompany] = useState<Company | null>(null);
+  const [editForm, setEditForm] = useState({ name: '', industry: '', timezone: '' });
+  const [isSaving, setIsSaving] = useState(false);
+  
+  // Delete confirmation state
+  const [deletingCompany, setDeletingCompany] = useState<Company | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Filter companies
   const filteredCompanies = companies.filter((company) => {
@@ -97,17 +132,61 @@ export default function AgencyDashboard() {
     }
   };
 
-  const handleDelete = async (company: Company) => {
-    if (!confirm(`Are you sure you want to delete "${company.name}"? This action cannot be undone.`)) {
+  const openEditModal = (company: Company) => {
+    setEditingCompany(company);
+    setEditForm({
+      name: company.name,
+      industry: company.industry || '',
+      timezone: company.timezone,
+    });
+  };
+
+  const handleEditSave = async () => {
+    if (!editingCompany || !editForm.name) {
+      toast.error('Company name is required');
+      return;
+    }
+    
+    setIsSaving(true);
+    const { error } = await supabase
+      .from('companies')
+      .update({
+        name: editForm.name,
+        industry: editForm.industry || null,
+        timezone: editForm.timezone,
+      })
+      .eq('id', editingCompany.id);
+
+    setIsSaving(false);
+    if (error) {
+      toast.error('Failed to update company');
+    } else {
+      toast.success('Company updated successfully');
+      setEditingCompany(null);
+      refetchCompanies();
+    }
+  };
+
+  const openDeleteConfirm = (company: Company) => {
+    setDeletingCompany(company);
+    setDeleteConfirmText('');
+  };
+
+  const handleDelete = async () => {
+    if (!deletingCompany || deleteConfirmText !== deletingCompany.name) {
+      toast.error('Please type the company name to confirm');
       return;
     }
 
-    const { error } = await supabase.from('companies').delete().eq('id', company.id);
+    setIsDeleting(true);
+    const { error } = await supabase.from('companies').delete().eq('id', deletingCompany.id);
 
+    setIsDeleting(false);
     if (error) {
       toast.error('Failed to delete company');
     } else {
       toast.success('Company deleted');
+      setDeletingCompany(null);
       refetchCompanies();
     }
   };
@@ -240,7 +319,8 @@ export default function AgencyDashboard() {
       <Card>
         <CardContent className="p-0">
           {isLoading ? (
-            <div className="p-8 text-center text-muted-foreground">
+            <div className="p-8 text-center text-muted-foreground flex items-center justify-center gap-2">
+              <Loader2 className="h-5 w-5 animate-spin" />
               Loading companies...
             </div>
           ) : filteredCompanies.length === 0 ? (
@@ -278,7 +358,7 @@ export default function AgencyDashboard() {
               </TableHeader>
               <TableBody>
                 {filteredCompanies.map((company) => (
-                  <TableRow key={company.id} className="group">
+                  <TableRow key={company.id} className="group cursor-pointer" onClick={() => handleView(company)}>
                     <TableCell>
                       <div className="font-medium">{company.name}</div>
                     </TableCell>
@@ -299,7 +379,7 @@ export default function AgencyDashboard() {
                     <TableCell className="text-muted-foreground">
                       {new Date(company.created_at).toLocaleDateString()}
                     </TableCell>
-                    <TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
@@ -315,7 +395,7 @@ export default function AgencyDashboard() {
                             <Eye className="h-4 w-4 mr-2" />
                             View
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleView(company)}>
+                          <DropdownMenuItem onClick={() => openEditModal(company)}>
                             <Pencil className="h-4 w-4 mr-2" />
                             Edit
                           </DropdownMenuItem>
@@ -337,7 +417,7 @@ export default function AgencyDashboard() {
                           )}
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
-                            onClick={() => handleDelete(company)}
+                            onClick={() => openDeleteConfirm(company)}
                             className="text-destructive focus:text-destructive"
                           >
                             <Trash2 className="h-4 w-4 mr-2" />
@@ -353,6 +433,84 @@ export default function AgencyDashboard() {
           )}
         </CardContent>
       </Card>
+
+      {/* Edit Company Sheet */}
+      <Sheet open={!!editingCompany} onOpenChange={() => setEditingCompany(null)}>
+        <SheetContent>
+          <SheetHeader>
+            <SheetTitle>Edit Company</SheetTitle>
+            <SheetDescription>Update company details</SheetDescription>
+          </SheetHeader>
+          <div className="space-y-4 mt-6">
+            <div className="space-y-2">
+              <Label>Company Name</Label>
+              <Input
+                value={editForm.name}
+                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Industry</Label>
+              <Select value={editForm.industry} onValueChange={(v) => setEditForm({ ...editForm, industry: v })}>
+                <SelectTrigger><SelectValue placeholder="Select industry" /></SelectTrigger>
+                <SelectContent>
+                  {industries.filter(i => i !== 'All Industries').map((ind) => (
+                    <SelectItem key={ind} value={ind}>{ind}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Timezone</Label>
+              <Select value={editForm.timezone} onValueChange={(v) => setEditForm({ ...editForm, timezone: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {timezones.map((tz) => (
+                    <SelectItem key={tz} value={tz}>{tz}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button onClick={handleEditSave} disabled={isSaving} className="w-full bg-accent hover:bg-accent/90">
+              {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Save Changes
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deletingCompany} onOpenChange={() => setDeletingCompany(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-destructive">Delete Company</DialogTitle>
+            <DialogDescription>
+              This action cannot be undone. This will permanently delete the company and all associated data.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm">
+              To confirm, type <strong className="text-foreground">{deletingCompany?.name}</strong> below:
+            </p>
+            <Input
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              placeholder="Type company name to confirm"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeletingCompany(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={isDeleting || deleteConfirmText !== deletingCompany?.name}
+            >
+              {isDeleting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
+              Delete Company
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </motion.div>
   );
 }
