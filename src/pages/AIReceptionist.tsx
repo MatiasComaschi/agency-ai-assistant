@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Save, MessageSquare, Bot, Settings, Clock, Loader2, Play, RotateCcw, Send, X } from 'lucide-react';
+import { Save, MessageSquare, Bot, Settings, Clock, Loader2, Play, RotateCcw } from 'lucide-react';
 import { useCompany } from '@/contexts/CompanyContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,13 +8,11 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Input } from '@/components/ui/input';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
 import type { Json } from '@/integrations/supabase/types';
 import type { AIProfile, AllowedActions } from '@/types';
+import { AISimulator } from '@/components/ai-simulator/AISimulator';
 
 // Industry templates
 const templates: Record<string, { greeting: string; disclosure: string; systemPrompt: string }> = {
@@ -56,9 +54,6 @@ export default function AIReceptionist() {
 
   // Simulator state
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
-  const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'ai'; content: string }>>([]);
-  const [userInput, setUserInput] = useState('');
-  const [isThinking, setIsThinking] = useState(false);
 
   useEffect(() => {
     if (currentCompany) {
@@ -144,35 +139,6 @@ export default function AIReceptionist() {
     }
   };
 
-  // Simulator functions
-  const openSimulator = () => {
-    setChatMessages([{ role: 'ai', content: greeting || 'Hello! How can I help you today?' }]);
-    setIsSimulatorOpen(true);
-  };
-
-  const sendMessage = async () => {
-    if (!userInput.trim()) return;
-    
-    const newMessages = [...chatMessages, { role: 'user' as const, content: userInput }];
-    setChatMessages(newMessages);
-    setUserInput('');
-    setIsThinking(true);
-
-    // Simulate AI response (in a real implementation, this would call an AI endpoint)
-    setTimeout(() => {
-      const responses = [
-        "I'd be happy to help you with that! Let me check our availability.",
-        "Of course! We have several options that might work for you.",
-        "I understand. Let me see what I can do to assist you with that request.",
-        "That's a great question! Based on our services, I would recommend...",
-        "I can definitely help schedule that for you. What day works best?",
-      ];
-      const aiResponse = responses[Math.floor(Math.random() * responses.length)];
-      setChatMessages([...newMessages, { role: 'ai', content: aiResponse }]);
-      setIsThinking(false);
-    }, 1000 + Math.random() * 1000);
-  };
-
   if (isLoading) {
     return (
       <div className="p-8 text-center text-muted-foreground flex items-center justify-center gap-2">
@@ -201,7 +167,7 @@ export default function AIReceptionist() {
               <DropdownMenuItem onClick={() => applyTemplate('hvac')}>❄️ HVAC</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button onClick={openSimulator} className="bg-accent hover:bg-accent/90">
+          <Button onClick={() => setIsSimulatorOpen(true)} className="bg-accent hover:bg-accent/90">
             <Play className="h-4 w-4 mr-2" /> Test AI
           </Button>
         </div>
@@ -284,50 +250,12 @@ export default function AIReceptionist() {
         </CardContent>
       </Card>
 
-      {/* AI Simulator Dialog */}
-      <Dialog open={isSimulatorOpen} onOpenChange={setIsSimulatorOpen}>
-        <DialogContent className="max-w-md h-[600px] flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Bot className="h-5 w-5" /> AI Simulator
-            </DialogTitle>
-          </DialogHeader>
-          <ScrollArea className="flex-1 pr-4">
-            <div className="space-y-4">
-              {chatMessages.map((msg, i) => (
-                <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[80%] rounded-lg px-4 py-2 ${
-                    msg.role === 'user' 
-                      ? 'bg-accent text-accent-foreground' 
-                      : 'bg-muted'
-                  }`}>
-                    {msg.content}
-                  </div>
-                </div>
-              ))}
-              {isThinking && (
-                <div className="flex justify-start">
-                  <div className="bg-muted rounded-lg px-4 py-2 flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Thinking...
-                  </div>
-                </div>
-              )}
-            </div>
-          </ScrollArea>
-          <div className="flex gap-2 pt-4 border-t">
-            <Input
-              value={userInput}
-              onChange={(e) => setUserInput(e.target.value)}
-              placeholder="Type a message..."
-              onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-            />
-            <Button onClick={sendMessage} disabled={isThinking} size="icon">
-              <Send className="h-4 w-4" />
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* AI Simulator */}
+      <AISimulator 
+        open={isSimulatorOpen} 
+        onOpenChange={setIsSimulatorOpen} 
+        company={currentCompany} 
+      />
     </motion.div>
   );
 }
