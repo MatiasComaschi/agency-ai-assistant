@@ -40,7 +40,7 @@ Deno.serve(async (req) => {
     // Generate a realistic test CallSid
     const testCallSid = `CA_TEST_${Date.now().toString(16).toUpperCase()}`;
     
-    // Build a realistic Twilio payload with proper CallSid
+    // Build a realistic Twilio payload as form-urlencoded (matching real Twilio requests)
     const mockPayload = new URLSearchParams({
       CallSid: testCallSid,
       AccountSid: "ACtest123456789",
@@ -54,11 +54,12 @@ Deno.serve(async (req) => {
       _test: "true",
     });
 
-    // Call twilio-voice-inbound server-to-server (no CORS issues)
+    // Call twilio-voice-inbound server-to-server with form-urlencoded (matching real Twilio)
     const inboundUrl = `${supabaseUrl}/functions/v1/twilio-voice-inbound`;
     
     console.log("[twilio-webhook-test] Calling:", inboundUrl);
     console.log("[twilio-webhook-test] Test CallSid:", testCallSid);
+    console.log("[twilio-webhook-test] Payload:", mockPayload.toString());
     
     const response = await fetch(inboundUrl, {
       method: "POST",
@@ -69,17 +70,25 @@ Deno.serve(async (req) => {
       body: mockPayload.toString(),
     });
 
-    const twimlText = await response.text();
+    const responseText = await response.text();
     const httpStatus = response.status;
+    const contentType = response.headers.get("content-type") || "";
 
     console.log("[twilio-webhook-test] Response status:", httpStatus);
-    console.log("[twilio-webhook-test] TwiML response length:", twimlText.length);
+    console.log("[twilio-webhook-test] Content-Type:", contentType);
+    console.log("[twilio-webhook-test] Response length:", responseText.length);
+    console.log("[twilio-webhook-test] Response preview:", responseText.substring(0, 500));
 
-    // Determine if it was successful
-    const isValidTwiml = twimlText.includes("<Response>");
-    const isCompanyMatched = !twimlText.includes("not configured") && 
-                             !twimlText.includes("technical difficulties") &&
-                             !twimlText.includes("cannot process");
+    // Validate it's proper TwiML
+    const isXml = contentType.includes("text/xml") || contentType.includes("application/xml");
+    const hasXmlDeclaration = responseText.includes("<?xml");
+    const hasResponseTag = responseText.includes("<Response>");
+    const isValidTwiml = isXml && hasXmlDeclaration && hasResponseTag;
+
+    // Determine the result status based on response content
+    const isCompanyMatched = !responseText.includes("not configured") && 
+                             !responseText.includes("having trouble") &&
+                             !responseText.includes("cannot process");
 
     let resultStatus: "matched_company" | "no_match" | "error" = "error";
     if (isValidTwiml && isCompanyMatched) {
@@ -88,8 +97,8 @@ Deno.serve(async (req) => {
       resultStatus = "no_match";
     }
 
-    // Extract action URLs from the TwiML for display
-    const actionUrlMatches = twimlText.match(/action="([^"]+)"/g) || [];
+    // Extract action URLs from the TwiML for debugging
+    const actionUrlMatches = responseText.match(/action="([^"]+)"/g) || [];
     const actionUrls = actionUrlMatches.map(m => m.replace('action="', '').replace('"', ''));
     
     // Extract call_id from action URLs if present
@@ -107,11 +116,14 @@ Deno.serve(async (req) => {
         ok: resultStatus === "matched_company",
         status: resultStatus,
         httpStatus,
-        twimlText,
+        contentType,
+        isValidTwiml,
+        twimlText: responseText,
         testCallSid,
         extractedCallId,
         actionUrls,
-        error: resultStatus === "error" ? "Invalid response from webhook" : null,
+        error: !isValidTwiml ? "Response is not valid TwiML XML" : 
+               resultStatus === "error" ? "Invalid response from webhook" : null,
         timestamp: new Date().toISOString(),
       }),
       { 

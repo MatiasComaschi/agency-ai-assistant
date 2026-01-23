@@ -97,7 +97,6 @@ async function logAudit(
   metadata: Record<string, unknown>
 ): Promise<void> {
   try {
-    // Use a system user ID for webhook-initiated audits
     const systemUserId = "00000000-0000-0000-0000-000000000000";
     
     await supabase.from("audits").insert({
@@ -113,18 +112,14 @@ async function logAudit(
   }
 }
 
-// Input validation
 // Phone number normalization to E.164 format
 function normalizeToE164(phone: string): { valid: boolean; normalized: string } {
   if (!phone) return { valid: false, normalized: "" };
   
-  // Remove all non-digit characters except leading +
   let normalized = phone.replace(/[^\d+]/g, "");
   
-  // Ensure it starts with +
   if (!normalized.startsWith("+")) {
     const digits = normalized.replace(/\D/g, "");
-    // Assume US number if 10 digits
     if (digits.length === 10) {
       normalized = `+1${digits}`;
     } else if (digits.length === 11 && digits.startsWith("1")) {
@@ -134,7 +129,6 @@ function normalizeToE164(phone: string): { valid: boolean; normalized: string } 
     }
   }
   
-  // Validate E.164 format: + followed by 7-15 digits
   const valid = /^\+[1-9]\d{6,14}$/.test(normalized);
   return { valid, normalized: valid ? normalized : phone };
 }
@@ -144,67 +138,80 @@ function sanitizeString(input: string, maxLength = 1000): string {
   return input.trim().substring(0, maxLength).replace(/\0/g, "").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
 }
 
-// CORS headers for browser requests
+// CORS headers for browser requests (used for OPTIONS preflight only)
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
-// TwiML helper functions
-const twimlResponse = (body: string): Response => {
-  return new Response(
-    `<?xml version="1.0" encoding="UTF-8"?><Response>${body}</Response>`,
-    { headers: { ...corsHeaders, "Content-Type": "application/xml" } }
-  );
-};
-
-const say = (text: string, voice = "Polly.Joanna"): string => {
-  return `<Say voice="${voice}">${escapeXml(text)}</Say>`;
-};
-
-const gather = (options: {
-  action: string;
-  input?: string;
-  timeout?: number;
-  speechTimeout?: string;
-  hints?: string;
-  innerTwiml?: string;
-}): string => {
-  const attrs = [
-    `action="${options.action}"`,
-    `input="${options.input || "speech"}"`,
-    `timeout="${options.timeout || 3}"`,
-    `speechTimeout="${options.speechTimeout || "auto"}"`,
-  ];
-  if (options.hints) attrs.push(`hints="${options.hints}"`);
-  return `<Gather ${attrs.join(" ")}>${options.innerTwiml || ""}</Gather>`;
-};
-
-const dial = (number: string, options?: { record?: boolean; action?: string }): string => {
-  const attrs: string[] = [];
-  if (options?.record) attrs.push('record="record-from-answer-dual"');
-  if (options?.action) attrs.push(`action="${options.action}"`);
-  return `<Dial ${attrs.join(" ")}>${number}</Dial>`;
-};
-
-const record = (options: { action: string; maxLength?: number; transcribe?: boolean }): string => {
-  const attrs = [`action="${options.action}"`, `maxLength="${options.maxLength || 120}"`];
-  if (options.transcribe) {
-    attrs.push(`transcribe="true"`);
-    attrs.push(`transcribeCallback="${options.action}"`);
-  }
-  return `<Record ${attrs.join(" ")} />`;
-};
-
-const escapeXml = (text: string): string => {
+// XML escape function - MUST be called on all dynamic text
+function escapeXml(text: string): string {
+  if (!text) return "";
   return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
-};
+}
+
+// Build valid TwiML response - ALWAYS returns text/xml
+function buildTwimlResponse(body: string): Response {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?><Response>${body}</Response>`;
+  return new Response(xml, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/xml; charset=utf-8",
+    },
+  });
+}
+
+// Error TwiML - fallback for any failure
+function buildErrorTwiml(): Response {
+  return buildTwimlResponse(
+    `<Say voice="Polly.Joanna">Sorry, we're having trouble right now. Please try again later.</Say><Hangup />`
+  );
+}
+
+// TwiML builder helpers
+function say(text: string, voice = "Polly.Joanna"): string {
+  return `<Say voice="${voice}">${escapeXml(text)}</Say>`;
+}
+
+function gather(options: {
+  action: string;
+  input?: string;
+  timeout?: number;
+  speechTimeout?: string;
+  hints?: string;
+  innerTwiml?: string;
+}): string {
+  const attrs = [
+    `action="${escapeXml(options.action)}"`,
+    `input="${options.input || "speech"}"`,
+    `timeout="${options.timeout || 3}"`,
+    `speechTimeout="${options.speechTimeout || "auto"}"`,
+  ];
+  if (options.hints) attrs.push(`hints="${escapeXml(options.hints)}"`);
+  return `<Gather ${attrs.join(" ")}>${options.innerTwiml || ""}</Gather>`;
+}
+
+function dial(number: string, options?: { record?: boolean; action?: string }): string {
+  const attrs: string[] = [];
+  if (options?.record) attrs.push('record="record-from-answer-dual"');
+  if (options?.action) attrs.push(`action="${escapeXml(options.action)}"`);
+  return `<Dial ${attrs.join(" ")}>${escapeXml(number)}</Dial>`;
+}
+
+function record(options: { action: string; maxLength?: number; transcribe?: boolean }): string {
+  const attrs = [`action="${escapeXml(options.action)}"`, `maxLength="${options.maxLength || 120}"`];
+  if (options.transcribe) {
+    attrs.push(`transcribe="true"`);
+    attrs.push(`transcribeCallback="${escapeXml(options.action)}"`);
+  }
+  return `<Record ${attrs.join(" ")} />`;
+}
 
 // Check if current time is within business hours
 const isWithinBusinessHours = (
@@ -333,82 +340,100 @@ const incrementUsage = async (supabase: any, companyId: string): Promise<void> =
   }
 };
 
+// Parse Twilio form data from request
+async function parseTwilioParams(req: Request): Promise<Record<string, string>> {
+  const params: Record<string, string> = {};
+  const contentType = req.headers.get("content-type") || "";
+
+  try {
+    if (contentType.includes("application/x-www-form-urlencoded")) {
+      // Standard Twilio POST - form-urlencoded
+      const formData = await req.formData();
+      for (const [key, value] of formData.entries()) {
+        params[key] = value.toString();
+      }
+    } else if (contentType.includes("application/json")) {
+      // JSON for internal test calls only
+      const json = await req.json();
+      for (const key in json) {
+        params[key] = String(json[key]);
+      }
+    } else {
+      // Fallback: try to parse as form-urlencoded text
+      const text = await req.text();
+      if (text) {
+        const urlParams = new URLSearchParams(text);
+        for (const [key, value] of urlParams.entries()) {
+          params[key] = value;
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[twilio-voice-inbound] Error parsing request body:", err);
+  }
+
+  return params;
+}
+
 Deno.serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { status: 200, headers: corsHeaders });
   }
 
   const startTime = Date.now();
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+  
+  // Initialize Supabase client
+  let supabase;
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    
+    if (!supabaseUrl || !supabaseServiceKey) {
+      console.error("[twilio-voice-inbound] Missing Supabase credentials");
+      return buildErrorTwiml();
+    }
+    
+    supabase = createClient(supabaseUrl, supabaseServiceKey);
+  } catch (err) {
+    console.error("[twilio-voice-inbound] Failed to create Supabase client:", err);
+    return buildErrorTwiml();
+  }
 
   let companyId: string | null = null;
   let debugMode = false;
   let rawParams: Record<string, string> = {};
 
+  // MASTER try/catch - ensures we ALWAYS return valid TwiML
   try {
-    // Parse form data from Twilio or JSON for test calls
-    const contentType = req.headers.get("content-type") || "";
+    // Parse the request body
+    rawParams = await parseTwilioParams(req);
 
-    if (contentType.includes("application/x-www-form-urlencoded")) {
-      const formData = await req.formData();
-      for (const [key, value] of formData.entries()) {
-        rawParams[key] = value.toString();
-      }
-    } else if (contentType.includes("application/json")) {
-      rawParams = await req.json();
-    } else {
-      // Try to parse as form data anyway (Twilio default)
-      try {
-        const text = await req.text();
-        const params = new URLSearchParams(text);
-        for (const [key, value] of params.entries()) {
-          rawParams[key] = value;
-        }
-      } catch {
-        console.warn("[twilio-voice-inbound] Could not parse request body");
-      }
-    }
-
-    // Log raw incoming request
     console.log("[twilio-voice-inbound] ====== INCOMING CALL ======");
     console.log("[twilio-voice-inbound] Raw params:", JSON.stringify(rawParams, null, 2));
 
-    // Normalize phone numbers to E.164 BEFORE any database queries
+    // Extract and normalize phone numbers
     const calledResult = normalizeToE164(rawParams.Called || rawParams.To || "");
     const callerResult = normalizeToE164(rawParams.From || rawParams.Caller || "");
     const calledNumber = calledResult.normalized;
     const callerNumber = callerResult.normalized;
     
-    // Extract and validate CallSid - this is critical for Dial action URLs
+    // Extract CallSid - critical for action URLs
     const rawCallSid = rawParams.CallSid || "";
     const twilioCallSid = rawCallSid ? sanitizeString(rawCallSid, 50) : "MISSING_CALLSID";
     
-    console.log("[twilio-voice-inbound] Extracted CallSid:", { 
-      rawCallSid,
-      twilioCallSid,
-      hasMissingCallSid: twilioCallSid === "MISSING_CALLSID",
-    });
-
-    console.log("[twilio-voice-inbound] Normalized numbers:", { 
+    console.log("[twilio-voice-inbound] Extracted:", { 
       calledNumber, 
       callerNumber, 
       twilioCallSid,
       calledValid: calledResult.valid,
       callerValid: callerResult.valid,
-      rawCalled: rawParams.Called || rawParams.To,
-      rawFrom: rawParams.From || rawParams.Caller,
     });
 
     // Validate called number
     if (!calledNumber || !calledResult.valid) {
-      console.error("[twilio-voice-inbound] FAILURE: Invalid or missing Called number");
-      console.error("[twilio-voice-inbound] Raw Called:", rawParams.Called);
-      console.error("[twilio-voice-inbound] Raw To:", rawParams.To);
+      console.error("[twilio-voice-inbound] FAILURE: Invalid Called number:", rawParams.Called || rawParams.To);
       
-      // Log to audits as unmatched call
       await logAudit(supabase, null, "inbound_call", "twilio_webhook", null, {
         status: "error",
         reason: "invalid_called_number",
@@ -417,8 +442,7 @@ Deno.serve(async (req) => {
         call_sid: twilioCallSid,
       });
       
-      const errorTwiml = say("We're sorry, but we cannot process your call at this time. Please try again later.");
-      return twimlResponse(errorTwiml);
+      return buildTwimlResponse(say("We're sorry, but we cannot process your call at this time. Please try again later."));
     }
 
     // Rate limiting by caller number
@@ -432,10 +456,10 @@ Deno.serve(async (req) => {
         called_number: calledNumber,
       });
       
-      return twimlResponse(say("You have made too many calls. Please try again later."));
+      return buildTwimlResponse(say("You have made too many calls. Please try again later."));
     }
 
-    // Identify company by twilio_number (using normalized E.164 format)
+    // Find company by twilio_number
     console.log("[twilio-voice-inbound] Querying companies for twilio_number:", calledNumber);
     
     const { data: company, error: companyError } = await supabase
@@ -445,11 +469,8 @@ Deno.serve(async (req) => {
       .single();
 
     if (companyError || !company) {
-      console.error("[twilio-voice-inbound] FAILURE: Company not found");
-      console.error("[twilio-voice-inbound] Searched for twilio_number:", calledNumber);
-      console.error("[twilio-voice-inbound] Query error:", companyError);
+      console.error("[twilio-voice-inbound] FAILURE: Company not found for:", calledNumber);
       
-      // Log to audits as no_match
       await logAudit(supabase, null, "inbound_call", "twilio_webhook", null, {
         status: "no_match",
         reason: "company_not_found",
@@ -459,17 +480,13 @@ Deno.serve(async (req) => {
         error: companyError?.message || "No company found",
       });
 
-      const noMatchTwiml = say("This number is not configured yet. Please contact support to complete your setup.");
-      return twimlResponse(noMatchTwiml);
+      return buildTwimlResponse(say("This number is not configured yet. Please contact support to complete your setup."));
     }
 
     companyId = company.id;
-    console.log("[twilio-voice-inbound] SUCCESS: Found company");
-    console.log("[twilio-voice-inbound] Company ID:", company.id);
-    console.log("[twilio-voice-inbound] Company name:", company.name);
-    console.log("[twilio-voice-inbound] Company twilio_number:", company.twilio_number);
+    console.log("[twilio-voice-inbound] SUCCESS: Found company:", company.name, "(", company.id, ")");
 
-    // Fetch Twilio integration config to check debug mode
+    // Get integration config for debug mode and recording settings
     const { data: integration } = await supabase
       .from("integrations")
       .select("config_json, status")
@@ -482,12 +499,7 @@ Deno.serve(async (req) => {
     const recordCalls = config.record_calls !== false;
     const afterHoursAction = (config.after_hours_action as string) || "voicemail";
 
-    console.log("[twilio-voice-inbound] Config loaded:", {
-      debugMode,
-      recordCalls,
-      afterHoursAction,
-      integrationStatus: integration?.status,
-    });
+    console.log("[twilio-voice-inbound] Config:", { debugMode, recordCalls, afterHoursAction });
 
     // Log matched company to audits
     await logAudit(supabase, company.id, "inbound_call", "twilio_webhook", twilioCallSid, {
@@ -500,14 +512,14 @@ Deno.serve(async (req) => {
       ...(debugMode ? { raw_payload: rawParams } : {}),
     });
 
+    // Build base URL for action callbacks
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const functionsBase = `${supabaseUrl}/functions/v1`;
+
     // PANIC SWITCH: Check if AI is enabled
     if (company.ai_enabled === false) {
       console.log("[twilio-voice-inbound] AI disabled (panic switch) - forwarding to fallback");
       
-      const baseUrl = supabaseUrl.replace("/rest/v1", "");
-      const functionsBase = `${baseUrl}/functions/v1`;
-
-      // Create call log - use twilioCallSid as the primary identifier for action URLs
       const { data: callLog } = await supabase
         .from("calls")
         .insert({
@@ -522,55 +534,36 @@ Deno.serve(async (req) => {
 
       await recordMetric(supabase, company.id, "twilio-voice-inbound", true, Date.now() - startTime);
 
-      // Use callLog.id if available, otherwise use twilioCallSid as fallback
       const callIdParam = encodeURIComponent(callLog?.id || twilioCallSid);
       const companyIdParam = encodeURIComponent(company.id);
 
+      let twiml: string;
       if (company.fallback_phone) {
         const dialAction = `${functionsBase}/twilio-voice-dial-complete?call_id=${callIdParam}&company_id=${companyIdParam}`;
-        console.log("[twilio-voice-inbound] Dial action URL:", dialAction);
-        
-        const twiml = say("Please hold while we connect you with a team member.") +
-          dial(company.fallback_phone, {
-            record: recordCalls,
-            action: dialAction,
-          });
-        
-        if (debugMode) {
-          await logAudit(supabase, company.id, "twiml_response", "twilio_webhook", twilioCallSid, {
-            outcome: "ai_disabled_forward",
-            dial_action_url: dialAction,
-            call_id_param: callIdParam,
-            twiml_response: twiml,
-          });
-        }
-        
-        return twimlResponse(twiml);
+        twiml = say("Please hold while we connect you with a team member.") +
+          dial(company.fallback_phone, { record: recordCalls, action: dialAction });
       } else {
         const voicemailAction = `${functionsBase}/twilio-voice-voicemail?call_id=${callIdParam}&company_id=${companyIdParam}`;
-        console.log("[twilio-voice-inbound] Voicemail action URL:", voicemailAction);
-        
-        const twiml = say("We are currently unavailable. Please leave a message after the tone.") +
+        twiml = say("We are currently unavailable. Please leave a message after the tone.") +
           record({ action: voicemailAction, maxLength: 120, transcribe: true });
-        
-        if (debugMode) {
-          await logAudit(supabase, company.id, "twiml_response", "twilio_webhook", twilioCallSid, {
-            outcome: "ai_disabled_voicemail",
-            voicemail_action_url: voicemailAction,
-            call_id_param: callIdParam,
-            twiml_response: twiml,
-          });
-        }
-        
-        return twimlResponse(twiml);
       }
+      
+      if (debugMode) {
+        await logAudit(supabase, company.id, "twiml_response", "twilio_webhook", twilioCallSid, {
+          outcome: "ai_disabled",
+          call_id_param: callIdParam,
+          twiml_response: twiml,
+        });
+      }
+      
+      return buildTwimlResponse(twiml);
     }
 
     // Check subscription status
     const subscriptionStatus = await checkSubscriptionStatus(supabase, company.id);
-    console.log("[twilio-voice-inbound] Subscription status:", subscriptionStatus);
+    console.log("[twilio-voice-inbound] Subscription:", subscriptionStatus);
 
-    // Fetch AI profile for scripts and disclosure settings
+    // Get AI profile
     const { data: aiProfile, error: aiProfileError } = await supabase
       .from("ai_profiles")
       .select("*")
@@ -578,26 +571,17 @@ Deno.serve(async (req) => {
       .single();
 
     if (aiProfileError) {
-      console.warn("[twilio-voice-inbound] AI profile not found, using defaults:", aiProfileError.message);
+      console.warn("[twilio-voice-inbound] AI profile not found, using defaults");
     }
 
-    console.log("[twilio-voice-inbound] AI Profile loaded:", {
+    console.log("[twilio-voice-inbound] AI Profile:", {
       hasProfile: !!aiProfile,
-      greeting: aiProfile?.greeting_script?.substring(0, 50) + "...",
       disclosureRequired: aiProfile?.disclosure_required !== false,
-      tone: aiProfile?.tone,
-      voiceId: aiProfile?.voice_id,
     });
 
-    // Fetch business hours and holidays
+    // Get business hours and holidays
     const { data: hours } = await supabase.from("company_hours").select("*").eq("company_id", company.id);
     const { data: holidays } = await supabase.from("company_holidays").select("*").eq("company_id", company.id);
-
-    console.log("[twilio-voice-inbound] Business hours loaded:", {
-      hoursCount: hours?.length || 0,
-      holidaysCount: holidays?.length || 0,
-      timezone: company.timezone,
-    });
 
     // Create call log entry
     const { data: callLog, error: callLogError } = await supabase
@@ -622,35 +606,23 @@ Deno.serve(async (req) => {
       console.log("[twilio-voice-inbound] Created call log:", callLog.id);
     }
 
+    // Build action URL parameters
+    const callIdForUrls = encodeURIComponent(callLog?.id || twilioCallSid);
+    const companyIdForUrls = encodeURIComponent(company.id);
+
     // Get scripts from AI profile
     const greetingScript = aiProfile?.greeting_script || "Hello! Thank you for calling. How may I help you today?";
     const disclosureScript = aiProfile?.disclosure_script || "Please note that you are speaking with an AI assistant.";
     const afterHoursScript = aiProfile?.after_hours_script || "We are currently closed. Please leave a message after the tone and we will get back to you as soon as possible.";
-    
-    // Check if disclosure is required
     const disclosureRequired = aiProfile?.disclosure_required !== false;
 
-    // Build webhook URLs with properly encoded parameters
-    const baseUrl = supabaseUrl.replace("/rest/v1", "");
-    const functionsBase = `${baseUrl}/functions/v1`;
-    
-    // Use callLog.id if available, otherwise use twilioCallSid as fallback identifier
-    const callIdForUrls = encodeURIComponent(callLog?.id || twilioCallSid);
-    const companyIdForUrls = encodeURIComponent(company.id);
-    
-    console.log("[twilio-voice-inbound] Action URL parameters:", {
-      callIdForUrls,
-      companyIdForUrls,
-      usingCallLogId: !!callLog?.id,
-      usingTwilioCallSid: !callLog?.id,
-    });
-
-    // Handle inactive subscription - fallback to voicemail or forward
+    // Handle inactive subscription
     if (!subscriptionStatus.isActive) {
       console.log("[twilio-voice-inbound] Subscription inactive - using fallback");
       if (callLog) {
         await supabase.from("calls").update({ outcome: "subscription_inactive" }).eq("id", callLog.id);
       }
+      
       const inactiveMessage = "Thank you for calling. We're currently unable to connect you with our AI assistant. ";
       
       let twiml: string;
@@ -675,26 +647,20 @@ Deno.serve(async (req) => {
         });
       }
       
-      return twimlResponse(twiml);
+      return buildTwimlResponse(twiml);
     }
 
-    // Increment usage counter for active subscription
+    // Increment usage counter
     await incrementUsage(supabase, company.id);
 
-    // Check business hours (per-company allowed_hours enforcement)
+    // Check business hours
     const isHolidayToday = holidays ? isHoliday(holidays, company.timezone) : false;
     const isBusinessHours = hours && hours.length > 0 ? isWithinBusinessHours(hours, company.timezone) : true;
     const isOpen = !isHolidayToday && isBusinessHours;
 
-    console.log("[twilio-voice-inbound] Routing decision:", { 
-      isHolidayToday, 
-      isBusinessHours, 
-      isOpen, 
-      afterHoursAction,
-      timezone: company.timezone,
-    });
+    console.log("[twilio-voice-inbound] Routing:", { isHolidayToday, isBusinessHours, isOpen, afterHoursAction });
 
-    // Route based on business hours
+    // After hours handling
     if (!isOpen) {
       console.log("[twilio-voice-inbound] After hours - action:", afterHoursAction);
       if (callLog) {
@@ -724,7 +690,7 @@ Deno.serve(async (req) => {
         });
       }
       
-      return twimlResponse(twiml);
+      return buildTwimlResponse(twiml);
     }
 
     // Business hours - AI receptionist flow
@@ -743,7 +709,7 @@ Deno.serve(async (req) => {
       speechTimeout: "auto",
       hints: "booking, appointment, schedule, quote, question, help, speak to someone, transfer",
       innerTwiml: greetingTwiml,
-    }) + `<Redirect>${conversationAction}</Redirect>`;
+    }) + `<Redirect>${escapeXml(conversationAction)}</Redirect>`;
 
     await recordMetric(supabase, company.id, "twilio-voice-inbound", true, Date.now() - startTime);
 
@@ -759,28 +725,32 @@ Deno.serve(async (req) => {
     }
 
     console.log("[twilio-voice-inbound] ====== CALL ROUTED TO AI ======");
-    return twimlResponse(twiml);
+    return buildTwimlResponse(twiml);
     
   } catch (error) {
+    // CRITICAL: Catch-all error handler - MUST return valid TwiML
     console.error("[twilio-voice-inbound] ====== UNEXPECTED ERROR ======");
     console.error("[twilio-voice-inbound] Error:", error);
+    console.error("[twilio-voice-inbound] Stack:", error instanceof Error ? error.stack : "no stack");
     console.error("[twilio-voice-inbound] Raw params:", rawParams);
     
-    // Log error to audits
-    await logAudit(supabase, companyId, "inbound_call", "twilio_webhook", null, {
-      status: "error",
-      error_message: error instanceof Error ? error.message : String(error),
-      raw_payload: rawParams,
-    });
-    
-    if (companyId) {
-      await recordMetric(supabase, companyId, "twilio-voice-inbound", false, Date.now() - startTime, String(error));
+    // Try to log the error (but don't fail if logging fails)
+    try {
+      await logAudit(supabase, companyId, "inbound_call", "twilio_webhook", null, {
+        status: "error",
+        error_message: error instanceof Error ? error.message : String(error),
+        error_stack: debugMode && error instanceof Error ? error.stack : undefined,
+        raw_payload: rawParams,
+      });
+      
+      if (companyId) {
+        await recordMetric(supabase, companyId, "twilio-voice-inbound", false, Date.now() - startTime, String(error));
+      }
+    } catch (logError) {
+      console.error("[twilio-voice-inbound] Failed to log error:", logError);
     }
     
-    // Always return valid TwiML, never blank
-    const errorTwiml = say("We're sorry, but we're experiencing technical difficulties. Please try again later.") +
-      `<Hangup />`;
-    
-    return twimlResponse(errorTwiml);
+    // ALWAYS return valid TwiML - never blank, never JSON
+    return buildErrorTwiml();
   }
 });
