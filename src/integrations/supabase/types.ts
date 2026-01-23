@@ -573,6 +573,54 @@ export type Database = {
         }
         Relationships: []
       }
+      referrals: {
+        Row: {
+          code: string
+          company_id: string
+          converted_at: string | null
+          created_at: string
+          id: string
+          referred_company_id: string | null
+          reward_cents: number | null
+          status: string
+        }
+        Insert: {
+          code: string
+          company_id: string
+          converted_at?: string | null
+          created_at?: string
+          id?: string
+          referred_company_id?: string | null
+          reward_cents?: number | null
+          status?: string
+        }
+        Update: {
+          code?: string
+          company_id?: string
+          converted_at?: string | null
+          created_at?: string
+          id?: string
+          referred_company_id?: string | null
+          reward_cents?: number | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "referrals_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "referrals_referred_company_id_fkey"
+            columns: ["referred_company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       subscriptions: {
         Row: {
           calls_limit: number
@@ -621,6 +669,53 @@ export type Database = {
             foreignKeyName: "subscriptions_company_id_fkey"
             columns: ["company_id"]
             isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      testimonials: {
+        Row: {
+          approved_at: string | null
+          author_name: string
+          author_title: string | null
+          company_id: string
+          content: string
+          id: string
+          is_approved: boolean
+          is_public: boolean
+          rating: number | null
+          submitted_at: string
+        }
+        Insert: {
+          approved_at?: string | null
+          author_name: string
+          author_title?: string | null
+          company_id: string
+          content: string
+          id?: string
+          is_approved?: boolean
+          is_public?: boolean
+          rating?: number | null
+          submitted_at?: string
+        }
+        Update: {
+          approved_at?: string | null
+          author_name?: string
+          author_title?: string | null
+          company_id?: string
+          content?: string
+          id?: string
+          is_approved?: boolean
+          is_public?: boolean
+          rating?: number | null
+          submitted_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "testimonials_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
             referencedRelation: "companies"
             referencedColumns: ["id"]
           },
@@ -726,11 +821,59 @@ export type Database = {
           },
         ]
       }
+      white_label_settings: {
+        Row: {
+          assistant_name: string | null
+          company_id: string
+          created_at: string
+          custom_domain: string | null
+          id: string
+          is_enabled: boolean
+          logo_url: string | null
+          primary_color: string | null
+          secondary_color: string | null
+          updated_at: string
+        }
+        Insert: {
+          assistant_name?: string | null
+          company_id: string
+          created_at?: string
+          custom_domain?: string | null
+          id?: string
+          is_enabled?: boolean
+          logo_url?: string | null
+          primary_color?: string | null
+          secondary_color?: string | null
+          updated_at?: string
+        }
+        Update: {
+          assistant_name?: string | null
+          company_id?: string
+          created_at?: string
+          custom_domain?: string | null
+          id?: string
+          is_enabled?: boolean
+          logo_url?: string | null
+          primary_color?: string | null
+          secondary_color?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "white_label_settings_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      generate_referral_code: { Args: never; Returns: string }
       get_user_role_in_company: {
         Args: { _company_id: string; _user_id: string }
         Returns: string

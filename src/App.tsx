@@ -22,6 +22,10 @@ import BulkImport from "@/pages/BulkImport";
 import SupportConsole from "@/pages/SupportConsole";
 import AuditLog from "@/pages/AuditLog";
 import Monitoring from "@/pages/Monitoring";
+import ROIReport from "@/pages/ROIReport";
+import Referrals from "@/pages/Referrals";
+import Testimonials from "@/pages/Testimonials";
+import WhiteLabel from "@/pages/WhiteLabel";
 
 const queryClient = new QueryClient();
 
@@ -50,6 +54,10 @@ const App = () => (
               <Route path="integrations" element={<Integrations />} />
               <Route path="billing" element={<Billing />} />
               <Route path="monitoring" element={<Monitoring />} />
+              <Route path="roi-report" element={<ROIReport />} />
+              <Route path="referrals" element={<Referrals />} />
+              <Route path="testimonials" element={<Testimonials />} />
+              <Route path="white-label" element={<WhiteLabel />} />
               <Route path="settings" element={<Settings />} />
             </Route>
             <Route path="*" element={<NotFound />} />
