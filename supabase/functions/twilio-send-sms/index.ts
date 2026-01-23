@@ -7,9 +7,9 @@ const corsHeaders = {
 
 interface SendSmsRequest {
   company_id: string;
+  call_id: string;  // Required - used for idempotency
   to_phone: string;
   message: string;
-  call_id?: string;
 }
 
 interface TwilioCredentials {
@@ -39,10 +39,52 @@ Deno.serve(async (req) => {
     });
 
     // Validate required fields
-    if (!company_id || !to_phone || !message) {
+    if (!company_id || !call_id || !to_phone || !message) {
       return new Response(
-        JSON.stringify({ error: "Missing required fields: company_id, to_phone, message" }),
+        JSON.stringify({ error: "Missing required fields: company_id, call_id, to_phone, message" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // IDEMPOTENCY CHECK: Query call to check if SMS was already sent
+    const { data: existingCall, error: callError } = await supabase
+      .from("calls")
+      .select("id, extracted_json, company_id")
+      .eq("id", call_id)
+      .single();
+
+    if (callError || !existingCall) {
+      console.error("[twilio-send-sms] Call not found:", callError);
+      return new Response(
+        JSON.stringify({ error: "Call not found" }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Verify call belongs to the company
+    if (existingCall.company_id !== company_id) {
+      console.error("[twilio-send-sms] Call does not belong to company");
+      return new Response(
+        JSON.stringify({ error: "Call does not belong to specified company" }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const extractedJson = (existingCall.extracted_json as Record<string, unknown>) || {};
+    
+    // HARD STOP: Check if SMS was already sent for this call
+    if (extractedJson.booking_sent === true || extractedJson.sms_message_sid) {
+      console.log("[twilio-send-sms] SMS already sent for call:", call_id, {
+        booking_sent: extractedJson.booking_sent,
+        sms_message_sid: extractedJson.sms_message_sid,
+      });
+      return new Response(
+        JSON.stringify({ 
+          error: "SMS already sent for this call",
+          already_sent: true,
+          existing_message_sid: extractedJson.sms_message_sid,
+        }),
+        { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -150,45 +192,41 @@ Deno.serve(async (req) => {
 
     console.log("[twilio-send-sms] SMS sent successfully:", twilioResult.sid);
 
-    // If call_id provided, update the call record with booking_link_sent outcome
-    if (call_id) {
-      const { data: existingCall } = await supabase
-        .from("calls")
-        .select("extracted_json")
-        .eq("id", call_id)
-        .single();
+    // Update the call record with SMS details (idempotency markers)
+    const now = new Date().toISOString();
 
-      const existingJson = (existingCall?.extracted_json as Record<string, unknown>) || {};
-      const now = new Date().toISOString();
+    const { error: updateError } = await supabase
+      .from("calls")
+      .update({
+        outcome: "booking_link_sent",
+        extracted_json: {
+          ...extractedJson,
+          booking_sent: true,
+          booking_link_sent_at: now,
+          sms_message_sid: twilioResult.sid,
+          sms_to: to_phone,
+          sms_status: twilioResult.status,
+        },
+      })
+      .eq("id", call_id);
 
-      await supabase
-        .from("calls")
-        .update({
-          // Set outcome to 'booking_link_sent' - NOT 'booked' (that requires confirmed booking)
-          outcome: "booking_link_sent",
-          extracted_json: {
-            ...existingJson,
-            booking_sent: true,
-            booking_sent_at: now,
-            booking_sms_to: to_phone,
-            booking_sms_sid: twilioResult.sid,
-          },
-        })
-        .eq("id", call_id);
-
-      // Create follow-up task to track if booking was completed
-      await supabase
-        .from("followup_tasks")
-        .insert({
-          company_id,
-          call_id,
-          title: "Follow up on booking link",
-          notes: `Booking link SMS sent to ${to_phone} at ${now}. Confirm if customer completed booking.`,
-          status: "open",
-        });
-
-      console.log("[twilio-send-sms] Updated call outcome to 'booking_link_sent' and created follow-up task");
+    if (updateError) {
+      console.error("[twilio-send-sms] Failed to update call record:", updateError);
+      // SMS was sent but we couldn't update the record - log but don't fail
     }
+
+    // Create follow-up task to track if booking was completed
+    await supabase
+      .from("followup_tasks")
+      .insert({
+        company_id,
+        call_id,
+        title: "Follow up on booking link",
+        notes: `Booking link SMS sent to ${to_phone} at ${now}. Confirm if customer completed booking.`,
+        status: "open",
+      });
+
+    console.log("[twilio-send-sms] Updated call with idempotency markers and created follow-up task");
 
     return new Response(
       JSON.stringify({ 
