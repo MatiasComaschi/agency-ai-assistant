@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.twilio-voice-conversation]
 verify_jwt = false
+
+[functions.twilio-send-sms]
+verify_jwt = false
