@@ -150,7 +150,7 @@ Deno.serve(async (req) => {
 
     console.log("[twilio-send-sms] SMS sent successfully:", twilioResult.sid);
 
-    // If call_id provided, update the call record
+    // If call_id provided, update the call record with booking_link_sent outcome
     if (call_id) {
       const { data: existingCall } = await supabase
         .from("calls")
@@ -159,32 +159,35 @@ Deno.serve(async (req) => {
         .single();
 
       const existingJson = (existingCall?.extracted_json as Record<string, unknown>) || {};
+      const now = new Date().toISOString();
 
       await supabase
         .from("calls")
         .update({
+          // Set outcome to 'booking_link_sent' - NOT 'booked' (that requires confirmed booking)
+          outcome: "booking_link_sent",
           extracted_json: {
             ...existingJson,
-            booking_sms_sent: true,
-            booking_sms_sent_at: new Date().toISOString(),
+            booking_sent: true,
+            booking_sent_at: now,
             booking_sms_to: to_phone,
             booking_sms_sid: twilioResult.sid,
           },
         })
         .eq("id", call_id);
 
-      // Create follow-up task
+      // Create follow-up task to track if booking was completed
       await supabase
         .from("followup_tasks")
         .insert({
           company_id,
           call_id,
-          title: "Booking link sent",
-          notes: `SMS sent to ${to_phone} with booking information`,
+          title: "Follow up on booking link",
+          notes: `Booking link SMS sent to ${to_phone} at ${now}. Confirm if customer completed booking.`,
           status: "open",
         });
 
-      console.log("[twilio-send-sms] Created follow-up task for booking");
+      console.log("[twilio-send-sms] Updated call outcome to 'booking_link_sent' and created follow-up task");
     }
 
     return new Response(
