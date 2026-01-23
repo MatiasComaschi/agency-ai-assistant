@@ -86,6 +86,33 @@ async function recordMetric(
   }
 }
 
+// Audit logging for debug mode
+// deno-lint-ignore no-explicit-any
+async function logAudit(
+  supabase: any,
+  companyId: string | null,
+  action: string,
+  entityType: string,
+  entityId: string | null,
+  metadata: Record<string, unknown>
+): Promise<void> {
+  try {
+    // Use a system user ID for webhook-initiated audits
+    const systemUserId = "00000000-0000-0000-0000-000000000000";
+    
+    await supabase.from("audits").insert({
+      actor_user_id: systemUserId,
+      company_id: companyId || "00000000-0000-0000-0000-000000000000",
+      action,
+      entity_type: entityType,
+      entity_id: entityId,
+      metadata,
+    });
+  } catch (err) {
+    console.error("[audit] Error logging:", err);
+  }
+}
+
 // Input validation
 // Phone number normalization to E.164 format
 function normalizeToE164(phone: string): { valid: boolean; normalized: string } {
@@ -110,12 +137,6 @@ function normalizeToE164(phone: string): { valid: boolean; normalized: string } 
   // Validate E.164 format: + followed by 7-15 digits
   const valid = /^\+[1-9]\d{6,14}$/.test(normalized);
   return { valid, normalized: valid ? normalized : phone };
-}
-
-// Legacy wrapper for backward compatibility
-function validatePhoneNumber(phone: string): { valid: boolean; sanitized: string } {
-  const result = normalizeToE164(phone);
-  return { valid: result.valid, sanitized: result.normalized };
 }
 
 function sanitizeString(input: string, maxLength = 1000): string {
@@ -312,49 +333,79 @@ Deno.serve(async (req) => {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
   let companyId: string | null = null;
+  let debugMode = false;
+  let rawParams: Record<string, string> = {};
 
   try {
     // Parse form data from Twilio
     const contentType = req.headers.get("content-type") || "";
-    let params: Record<string, string> = {};
 
     if (contentType.includes("application/x-www-form-urlencoded")) {
       const formData = await req.formData();
       for (const [key, value] of formData.entries()) {
-        params[key] = value.toString();
+        rawParams[key] = value.toString();
       }
     } else if (contentType.includes("application/json")) {
-      params = await req.json();
+      rawParams = await req.json();
     }
 
+    // Log raw incoming request
+    console.log("[twilio-voice-inbound] ====== INCOMING CALL ======");
+    console.log("[twilio-voice-inbound] Raw params:", JSON.stringify(rawParams, null, 2));
+
     // Normalize phone numbers to E.164 BEFORE any database queries
-    const calledResult = normalizeToE164(params.Called || params.To || "");
-    const callerResult = normalizeToE164(params.From || params.Caller || "");
+    const calledResult = normalizeToE164(rawParams.Called || rawParams.To || "");
+    const callerResult = normalizeToE164(rawParams.From || rawParams.Caller || "");
     const calledNumber = calledResult.normalized;
     const callerNumber = callerResult.normalized;
-    const callSid = sanitizeString(params.CallSid || "", 50);
+    const callSid = sanitizeString(rawParams.CallSid || "", 50);
 
-    console.log("[twilio-voice-inbound] Incoming call:", { 
+    console.log("[twilio-voice-inbound] Normalized numbers:", { 
       calledNumber, 
       callerNumber, 
       callSid,
       calledValid: calledResult.valid,
       callerValid: callerResult.valid,
+      rawCalled: rawParams.Called || rawParams.To,
+      rawFrom: rawParams.From || rawParams.Caller,
     });
 
+    // Validate called number
     if (!calledNumber || !calledResult.valid) {
-      console.error("[twilio-voice-inbound] Invalid or missing Called number:", params.Called);
-      return twimlResponse(say("We're sorry, but we cannot process your call at this time. Please try again later."));
+      console.error("[twilio-voice-inbound] FAILURE: Invalid or missing Called number");
+      console.error("[twilio-voice-inbound] Raw Called:", rawParams.Called);
+      console.error("[twilio-voice-inbound] Raw To:", rawParams.To);
+      
+      // Log to audits as unmatched call
+      await logAudit(supabase, null, "inbound_call", "twilio_webhook", null, {
+        status: "error",
+        reason: "invalid_called_number",
+        called_number: rawParams.Called || rawParams.To || "missing",
+        caller_number: callerNumber,
+        call_sid: callSid,
+      });
+      
+      const errorTwiml = say("We're sorry, but we cannot process your call at this time. Please try again later.");
+      return twimlResponse(errorTwiml);
     }
 
     // Rate limiting by caller number
     const rateLimit = await checkRateLimit(supabase, callerNumber || "unknown", "twilio-voice-inbound", 30, 60);
     if (!rateLimit.allowed) {
       console.warn("[twilio-voice-inbound] Rate limit exceeded for:", callerNumber);
+      
+      await logAudit(supabase, null, "inbound_call", "twilio_webhook", null, {
+        status: "rate_limited",
+        caller_number: callerNumber,
+        called_number: calledNumber,
+      });
+      
       return twimlResponse(say("You have made too many calls. Please try again later."));
     }
 
     // Identify company by twilio_number (using normalized E.164 format)
+    console.log("[twilio-voice-inbound] Querying companies for twilio_number:", calledNumber);
+    
     const { data: company, error: companyError } = await supabase
       .from("companies")
       .select("id, name, twilio_number, fallback_phone, timezone, ai_enabled")
@@ -362,88 +413,31 @@ Deno.serve(async (req) => {
       .single();
 
     if (companyError || !company) {
-      console.error("[twilio-voice-inbound] Company not found for number:", calledNumber, companyError);
-      return twimlResponse(say("We're sorry, but this number is not configured. Please contact support."));
+      console.error("[twilio-voice-inbound] FAILURE: Company not found");
+      console.error("[twilio-voice-inbound] Searched for twilio_number:", calledNumber);
+      console.error("[twilio-voice-inbound] Query error:", companyError);
+      
+      // Log to audits as no_match
+      await logAudit(supabase, null, "inbound_call", "twilio_webhook", null, {
+        status: "no_match",
+        reason: "company_not_found",
+        called_number: calledNumber,
+        caller_number: callerNumber,
+        call_sid: callSid,
+        error: companyError?.message || "No company found",
+      });
+
+      const noMatchTwiml = say("This number is not configured yet. Please contact support to complete your setup.");
+      return twimlResponse(noMatchTwiml);
     }
 
     companyId = company.id;
-    console.log("[twilio-voice-inbound] Found company:", company.name, company.id);
+    console.log("[twilio-voice-inbound] SUCCESS: Found company");
+    console.log("[twilio-voice-inbound] Company ID:", company.id);
+    console.log("[twilio-voice-inbound] Company name:", company.name);
+    console.log("[twilio-voice-inbound] Company twilio_number:", company.twilio_number);
 
-    // PANIC SWITCH: Check if AI is enabled
-    if (company.ai_enabled === false) {
-      console.log("[twilio-voice-inbound] AI disabled (panic switch) - forwarding to fallback");
-      
-      if (company.fallback_phone) {
-        const { data: integration } = await supabase
-          .from("integrations")
-          .select("config_json")
-          .eq("company_id", company.id)
-          .eq("provider", "twilio")
-          .single();
-        const config = (integration?.config_json as Record<string, unknown>) || {};
-        const recordCalls = config.record_calls !== false;
-        const baseUrl = supabaseUrl.replace("/rest/v1", "");
-        const functionsBase = `${baseUrl}/functions/v1`;
-
-        // Create call log
-        const { data: callLog } = await supabase
-          .from("calls")
-          .insert({
-            company_id: company.id,
-            caller_number: callerNumber,
-            started_at: new Date().toISOString(),
-            outcome: "ai_disabled",
-            extracted_json: { call_sid: callSid, ai_disabled: true },
-          })
-          .select()
-          .single();
-
-        await recordMetric(supabase, company.id, "twilio-voice-inbound", true, Date.now() - startTime);
-
-        return twimlResponse(
-          say("Please hold while we connect you with a team member.") +
-          dial(company.fallback_phone, {
-            record: recordCalls,
-            action: `${functionsBase}/twilio-voice-dial-complete?call_id=${callLog?.id || ""}&company_id=${company.id}`,
-          })
-        );
-      } else {
-        // No fallback phone - take voicemail
-        const baseUrl = supabaseUrl.replace("/rest/v1", "");
-        const functionsBase = `${baseUrl}/functions/v1`;
-        const { data: callLog } = await supabase
-          .from("calls")
-          .insert({
-            company_id: company.id,
-            caller_number: callerNumber,
-            started_at: new Date().toISOString(),
-            outcome: "ai_disabled",
-            extracted_json: { call_sid: callSid, ai_disabled: true },
-          })
-          .select()
-          .single();
-
-        await recordMetric(supabase, company.id, "twilio-voice-inbound", true, Date.now() - startTime);
-
-        return twimlResponse(
-          say("We are currently unavailable. Please leave a message after the tone.") +
-          record({ action: `${functionsBase}/twilio-voice-voicemail?call_id=${callLog?.id || ""}&company_id=${company.id}`, maxLength: 120, transcribe: true })
-        );
-      }
-    }
-
-    // Check subscription status
-    const subscriptionStatus = await checkSubscriptionStatus(supabase, company.id);
-    console.log("[twilio-voice-inbound] Subscription status:", subscriptionStatus);
-
-    // Fetch AI profile for scripts and disclosure settings
-    const { data: aiProfile } = await supabase
-      .from("ai_profiles")
-      .select("*")
-      .eq("company_id", company.id)
-      .single();
-
-    // Fetch Twilio integration config
+    // Fetch Twilio integration config to check debug mode
     const { data: integration } = await supabase
       .from("integrations")
       .select("config_json, status")
@@ -452,12 +446,111 @@ Deno.serve(async (req) => {
       .single();
 
     const config = (integration?.config_json as Record<string, unknown>) || {};
+    debugMode = config.debug_mode === true;
     const recordCalls = config.record_calls !== false;
     const afterHoursAction = (config.after_hours_action as string) || "voicemail";
+
+    console.log("[twilio-voice-inbound] Config loaded:", {
+      debugMode,
+      recordCalls,
+      afterHoursAction,
+      integrationStatus: integration?.status,
+    });
+
+    // Log matched company to audits
+    await logAudit(supabase, company.id, "inbound_call", "twilio_webhook", callSid, {
+      status: "matched_company",
+      called_number: calledNumber,
+      caller_number: callerNumber,
+      company_name: company.name,
+      debug_mode: debugMode,
+      ...(debugMode ? { raw_payload: rawParams } : {}),
+    });
+
+    // PANIC SWITCH: Check if AI is enabled
+    if (company.ai_enabled === false) {
+      console.log("[twilio-voice-inbound] AI disabled (panic switch) - forwarding to fallback");
+      
+      const baseUrl = supabaseUrl.replace("/rest/v1", "");
+      const functionsBase = `${baseUrl}/functions/v1`;
+
+      // Create call log
+      const { data: callLog } = await supabase
+        .from("calls")
+        .insert({
+          company_id: company.id,
+          caller_number: callerNumber,
+          started_at: new Date().toISOString(),
+          outcome: "ai_disabled",
+          extracted_json: { call_sid: callSid, ai_disabled: true },
+        })
+        .select()
+        .single();
+
+      await recordMetric(supabase, company.id, "twilio-voice-inbound", true, Date.now() - startTime);
+
+      if (company.fallback_phone) {
+        const twiml = say("Please hold while we connect you with a team member.") +
+          dial(company.fallback_phone, {
+            record: recordCalls,
+            action: `${functionsBase}/twilio-voice-dial-complete?call_id=${callLog?.id || ""}&company_id=${company.id}`,
+          });
+        
+        if (debugMode) {
+          await logAudit(supabase, company.id, "twiml_response", "twilio_webhook", callSid, {
+            outcome: "ai_disabled_forward",
+            twiml_response: twiml,
+          });
+        }
+        
+        return twimlResponse(twiml);
+      } else {
+        const twiml = say("We are currently unavailable. Please leave a message after the tone.") +
+          record({ action: `${functionsBase}/twilio-voice-voicemail?call_id=${callLog?.id || ""}&company_id=${company.id}`, maxLength: 120, transcribe: true });
+        
+        if (debugMode) {
+          await logAudit(supabase, company.id, "twiml_response", "twilio_webhook", callSid, {
+            outcome: "ai_disabled_voicemail",
+            twiml_response: twiml,
+          });
+        }
+        
+        return twimlResponse(twiml);
+      }
+    }
+
+    // Check subscription status
+    const subscriptionStatus = await checkSubscriptionStatus(supabase, company.id);
+    console.log("[twilio-voice-inbound] Subscription status:", subscriptionStatus);
+
+    // Fetch AI profile for scripts and disclosure settings
+    const { data: aiProfile, error: aiProfileError } = await supabase
+      .from("ai_profiles")
+      .select("*")
+      .eq("company_id", company.id)
+      .single();
+
+    if (aiProfileError) {
+      console.warn("[twilio-voice-inbound] AI profile not found, using defaults:", aiProfileError.message);
+    }
+
+    console.log("[twilio-voice-inbound] AI Profile loaded:", {
+      hasProfile: !!aiProfile,
+      greeting: aiProfile?.greeting_script?.substring(0, 50) + "...",
+      disclosureRequired: aiProfile?.disclosure_required !== false,
+      tone: aiProfile?.tone,
+      voiceId: aiProfile?.voice_id,
+    });
 
     // Fetch business hours and holidays
     const { data: hours } = await supabase.from("company_hours").select("*").eq("company_id", company.id);
     const { data: holidays } = await supabase.from("company_holidays").select("*").eq("company_id", company.id);
+
+    console.log("[twilio-voice-inbound] Business hours loaded:", {
+      hoursCount: hours?.length || 0,
+      holidaysCount: holidays?.length || 0,
+      timezone: company.timezone,
+    });
 
     // Create call log entry
     const { data: callLog, error: callLogError } = await supabase
@@ -502,21 +595,28 @@ Deno.serve(async (req) => {
         await supabase.from("calls").update({ outcome: "subscription_inactive" }).eq("id", callLog.id);
       }
       const inactiveMessage = "Thank you for calling. We're currently unable to connect you with our AI assistant. ";
+      
+      let twiml: string;
       if (company.fallback_phone) {
-        await recordMetric(supabase, company.id, "twilio-voice-inbound", true, Date.now() - startTime);
-        return twimlResponse(
-          say(inactiveMessage + "Please hold while we connect you with a team member.") +
-          dial(company.fallback_phone, { record: recordCalls, action: `${functionsBase}/twilio-voice-dial-complete?call_id=${callLogId}&company_id=${company.id}` })
-        );
+        twiml = say(inactiveMessage + "Please hold while we connect you with a team member.") +
+          dial(company.fallback_phone, { record: recordCalls, action: `${functionsBase}/twilio-voice-dial-complete?call_id=${callLogId}&company_id=${company.id}` });
       } else {
         const voicemailAction = `${functionsBase}/twilio-voice-voicemail?call_id=${callLogId}&company_id=${company.id}`;
-        await recordMetric(supabase, company.id, "twilio-voice-inbound", true, Date.now() - startTime);
-        return twimlResponse(
-          say(inactiveMessage + "Please leave your name, number, and a brief message after the tone.") +
+        twiml = say(inactiveMessage + "Please leave your name, number, and a brief message after the tone.") +
           record({ action: voicemailAction, maxLength: 120, transcribe: config.transcribe_calls !== false }) +
-          say("We did not receive your message. Goodbye.")
-        );
+          say("We did not receive your message. Goodbye.");
       }
+      
+      await recordMetric(supabase, company.id, "twilio-voice-inbound", true, Date.now() - startTime);
+      
+      if (debugMode) {
+        await logAudit(supabase, company.id, "twiml_response", "twilio_webhook", callSid, {
+          outcome: "subscription_inactive",
+          twiml_response: twiml,
+        });
+      }
+      
+      return twimlResponse(twiml);
     }
 
     // Increment usage counter for active subscription
@@ -527,7 +627,13 @@ Deno.serve(async (req) => {
     const isBusinessHours = hours && hours.length > 0 ? isWithinBusinessHours(hours, company.timezone) : true;
     const isOpen = !isHolidayToday && isBusinessHours;
 
-    console.log("[twilio-voice-inbound] Routing decision:", { isHolidayToday, isBusinessHours, isOpen, afterHoursAction });
+    console.log("[twilio-voice-inbound] Routing decision:", { 
+      isHolidayToday, 
+      isBusinessHours, 
+      isOpen, 
+      afterHoursAction,
+      timezone: company.timezone,
+    });
 
     // Route based on business hours
     if (!isOpen) {
@@ -535,19 +641,29 @@ Deno.serve(async (req) => {
       if (callLog) {
         await supabase.from("calls").update({ outcome: "after_hours" }).eq("id", callLog.id);
       }
+      
+      let twiml: string;
       if (afterHoursAction === "forward" && company.fallback_phone) {
-        await recordMetric(supabase, company.id, "twilio-voice-inbound", true, Date.now() - startTime);
-        return twimlResponse(say(afterHoursScript) + dial(company.fallback_phone, { record: recordCalls }));
+        twiml = say(afterHoursScript) + dial(company.fallback_phone, { record: recordCalls });
       } else {
         const voicemailAction = `${functionsBase}/twilio-voice-voicemail?call_id=${callLogId}&company_id=${company.id}`;
-        await recordMetric(supabase, company.id, "twilio-voice-inbound", true, Date.now() - startTime);
-        return twimlResponse(
-          say(afterHoursScript) +
+        twiml = say(afterHoursScript) +
           say("Please leave your message after the tone.") +
           record({ action: voicemailAction, maxLength: 120, transcribe: config.transcribe_calls !== false }) +
-          say("We did not receive your message. Goodbye.")
-        );
+          say("We did not receive your message. Goodbye.");
       }
+      
+      await recordMetric(supabase, company.id, "twilio-voice-inbound", true, Date.now() - startTime);
+      
+      if (debugMode) {
+        await logAudit(supabase, company.id, "twiml_response", "twilio_webhook", callSid, {
+          outcome: "after_hours",
+          action: afterHoursAction,
+          twiml_response: twiml,
+        });
+      }
+      
+      return twimlResponse(twiml);
     }
 
     // Business hours - AI receptionist flow
@@ -559,27 +675,49 @@ Deno.serve(async (req) => {
       ? say(greetingScript) + say(disclosureScript)
       : say(greetingScript);
 
+    const twiml = gather({
+      action: conversationAction,
+      input: "speech",
+      timeout: 5,
+      speechTimeout: "auto",
+      hints: "booking, appointment, schedule, quote, question, help, speak to someone, transfer",
+      innerTwiml: greetingTwiml,
+    }) + `<Redirect>${conversationAction}</Redirect>`;
+
     await recordMetric(supabase, company.id, "twilio-voice-inbound", true, Date.now() - startTime);
 
-    return twimlResponse(
-      gather({
-        action: conversationAction,
-        input: "speech",
-        timeout: 5,
-        speechTimeout: "auto",
-        hints: "booking, appointment, schedule, quote, question, help, speak to someone, transfer",
-        innerTwiml: greetingTwiml,
-      }) +
-      `<Redirect>${conversationAction}</Redirect>`
-    );
+    if (debugMode) {
+      await logAudit(supabase, company.id, "twiml_response", "twilio_webhook", callSid, {
+        outcome: "ai_receptionist",
+        greeting_script: greetingScript,
+        disclosure_required: disclosureRequired,
+        twiml_response: twiml,
+      });
+    }
+
+    console.log("[twilio-voice-inbound] ====== CALL ROUTED TO AI ======");
+    return twimlResponse(twiml);
+    
   } catch (error) {
-    console.error("[twilio-voice-inbound] Unexpected error:", error);
+    console.error("[twilio-voice-inbound] ====== UNEXPECTED ERROR ======");
+    console.error("[twilio-voice-inbound] Error:", error);
+    console.error("[twilio-voice-inbound] Raw params:", rawParams);
+    
+    // Log error to audits
+    await logAudit(supabase, companyId, "inbound_call", "twilio_webhook", null, {
+      status: "error",
+      error_message: error instanceof Error ? error.message : String(error),
+      raw_payload: rawParams,
+    });
+    
     if (companyId) {
       await recordMetric(supabase, companyId, "twilio-voice-inbound", false, Date.now() - startTime, String(error));
     }
-    return twimlResponse(
-      say("We're sorry, but we're experiencing technical difficulties. Please try again later.") +
-      `<Hangup />`
-    );
+    
+    // Always return valid TwiML, never blank
+    const errorTwiml = say("We're sorry, but we're experiencing technical difficulties. Please try again later.") +
+      `<Hangup />`;
+    
+    return twimlResponse(errorTwiml);
   }
 });

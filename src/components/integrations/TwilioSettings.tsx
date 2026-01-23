@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Phone, Copy, Check, AlertTriangle, Clock, PhoneForwarded, Bot, Voicemail, Loader2 } from 'lucide-react';
+import { 
+  Phone, Copy, Check, AlertTriangle, Clock, PhoneForwarded, Bot, Voicemail, Loader2,
+  TestTube2, CheckCircle2, XCircle, Bug, Activity, RefreshCw, Wifi, WifiOff
+} from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,6 +10,8 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import type { Json } from '@/integrations/supabase/types';
@@ -17,11 +22,20 @@ interface TwilioConfig {
   transcribe_calls: boolean;
   after_hours_action: 'voicemail' | 'forward';
   escalation_action: 'forward';
+  debug_mode?: boolean;
 }
 
 interface TwilioSettingsProps {
   company: Company;
   onUpdate: () => void;
+}
+
+interface WebhookTestResult {
+  success: boolean;
+  status: 'matched_company' | 'no_match' | 'error' | 'pending';
+  message: string;
+  twimlResponse?: string;
+  timestamp: string;
 }
 
 // Phone number validation and normalization to E.164 format
@@ -58,16 +72,35 @@ export default function TwilioSettings({ company, onUpdate }: TwilioSettingsProp
     transcribe_calls: true,
     after_hours_action: 'voicemail',
     escalation_action: 'forward',
+    debug_mode: false,
   });
   const [aiProfile, setAiProfile] = useState<AIProfile | null>(null);
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [checkingUnique, setCheckingUnique] = useState(false);
+  
+  // Webhook testing state
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<WebhookTestResult | null>(null);
+  const [showTwimlResponse, setShowTwimlResponse] = useState(false);
+  
+  // Connection status state
+  const [connectionStatus, setConnectionStatus] = useState<{
+    twilioConnected: boolean;
+    numberConfigured: boolean;
+    lastChecked: string | null;
+  }>({
+    twilioConnected: false,
+    numberConfigured: false,
+    lastChecked: null,
+  });
+  const [checkingConnection, setCheckingConnection] = useState(false);
 
   useEffect(() => {
     fetchAIProfile();
     fetchTwilioIntegration();
+    checkConnectionStatus();
   }, [company.id]);
 
   const fetchAIProfile = async () => {
@@ -85,7 +118,7 @@ export default function TwilioSettings({ company, onUpdate }: TwilioSettingsProp
   const fetchTwilioIntegration = async () => {
     const { data } = await supabase
       .from('integrations')
-      .select('config_json')
+      .select('config_json, status')
       .eq('company_id', company.id)
       .eq('provider', 'twilio')
       .single();
@@ -97,7 +130,38 @@ export default function TwilioSettings({ company, onUpdate }: TwilioSettingsProp
         transcribe_calls: configData.transcribe_calls as boolean ?? true,
         after_hours_action: (configData.after_hours_action as 'voicemail' | 'forward') || 'voicemail',
         escalation_action: 'forward',
+        debug_mode: configData.debug_mode as boolean ?? false,
       });
+    }
+  };
+
+  const checkConnectionStatus = async () => {
+    setCheckingConnection(true);
+    try {
+      // Check if Twilio integration exists and is connected
+      const { data: integration } = await supabase
+        .from('integrations')
+        .select('status')
+        .eq('company_id', company.id)
+        .eq('provider', 'twilio')
+        .single();
+      
+      // Check if twilio_number is set on company
+      const { data: companyData } = await supabase
+        .from('companies')
+        .select('twilio_number')
+        .eq('id', company.id)
+        .single();
+      
+      setConnectionStatus({
+        twilioConnected: integration?.status === 'connected',
+        numberConfigured: !!companyData?.twilio_number,
+        lastChecked: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('Error checking connection status:', error);
+    } finally {
+      setCheckingConnection(false);
     }
   };
 
@@ -186,24 +250,29 @@ export default function TwilioSettings({ company, onUpdate }: TwilioSettingsProp
         transcribe_calls: config.transcribe_calls,
         after_hours_action: config.after_hours_action,
         escalation_action: config.escalation_action,
+        debug_mode: config.debug_mode,
       };
       
       if (existing) {
         await supabase
           .from('integrations')
-          .update({ config_json: configJson })
+          .update({ 
+            config_json: configJson,
+            status: normalizedTwilioNumber ? 'connected' : 'disconnected',
+          })
           .eq('id', existing.id);
       } else {
         await supabase.from('integrations').insert([{
           company_id: company.id,
           provider: 'twilio',
-          status: 'disconnected',
+          status: normalizedTwilioNumber ? 'connected' : 'disconnected',
           config_json: configJson,
         }]);
       }
 
       toast.success('Twilio settings saved successfully');
       onUpdate();
+      checkConnectionStatus();
     } catch (err) {
       console.error('Error saving settings:', err);
       toast.error('Failed to save settings');
@@ -224,8 +293,151 @@ export default function TwilioSettings({ company, onUpdate }: TwilioSettingsProp
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const testWebhook = async () => {
+    if (!twilioNumber) {
+      toast.error('Please configure a Twilio number first');
+      return;
+    }
+
+    setTesting(true);
+    setTestResult(null);
+
+    try {
+      const normalizedNumber = normalizeToE164(twilioNumber);
+      
+      // Create a mock Twilio payload
+      const mockPayload: Record<string, string> = {
+        CallSid: `CA${Date.now().toString(16).padStart(32, '0')}`,
+        From: '+15551234567',
+        To: normalizedNumber,
+        Called: normalizedNumber,
+        Caller: '+15551234567',
+        CallStatus: 'ringing',
+        Direction: 'inbound',
+        _test: 'true', // Flag to indicate this is a test
+      };
+
+      const webhookUrl = generateWebhookUrl();
+      
+      // Send test request to webhook
+      const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams(mockPayload as Record<string, string>).toString(),
+      });
+
+      const responseText = await response.text();
+      
+      if (response.ok && responseText.includes('<Response>')) {
+        // Check if it matched our company
+        const isError = responseText.includes('not configured') || responseText.includes('technical difficulties');
+        
+        setTestResult({
+          success: !isError,
+          status: isError ? 'no_match' : 'matched_company',
+          message: isError 
+            ? 'Webhook responded but company not matched. Check that your Twilio number is saved correctly.'
+            : 'Webhook is working! Company matched successfully.',
+          twimlResponse: responseText,
+          timestamp: new Date().toISOString(),
+        });
+        
+        if (!isError) {
+          toast.success('Webhook test passed!');
+        } else {
+          toast.warning('Webhook responded but company not matched');
+        }
+      } else {
+        setTestResult({
+          success: false,
+          status: 'error',
+          message: `Webhook returned status ${response.status}`,
+          twimlResponse: responseText,
+          timestamp: new Date().toISOString(),
+        });
+        toast.error('Webhook test failed');
+      }
+    } catch (error) {
+      console.error('Webhook test error:', error);
+      setTestResult({
+        success: false,
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Unknown error occurred',
+        timestamp: new Date().toISOString(),
+      });
+      toast.error('Failed to test webhook');
+    } finally {
+      setTesting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
+      {/* Connection Status Panel */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Activity className="h-5 w-5" />
+            Twilio Connection Status
+          </CardTitle>
+          <CardDescription>
+            Real-time status of your Twilio integration
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 gap-4">
+            {/* Integration Status */}
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
+              {connectionStatus.twilioConnected ? (
+                <Wifi className="h-5 w-5 text-success" />
+              ) : (
+                <WifiOff className="h-5 w-5 text-muted-foreground" />
+              )}
+              <div>
+                <p className="font-medium text-sm">Integration</p>
+                <p className="text-xs text-muted-foreground">
+                  {connectionStatus.twilioConnected ? 'Connected' : 'Not Connected'}
+                </p>
+              </div>
+            </div>
+
+            {/* Number Configured */}
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
+              {connectionStatus.numberConfigured ? (
+                <CheckCircle2 className="h-5 w-5 text-success" />
+              ) : (
+                <XCircle className="h-5 w-5 text-muted-foreground" />
+              )}
+              <div>
+                <p className="font-medium text-sm">Phone Number</p>
+                <p className="text-xs text-muted-foreground">
+                  {connectionStatus.numberConfigured ? 'Configured' : 'Not Set'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between mt-4 pt-4 border-t">
+            <p className="text-xs text-muted-foreground">
+              {connectionStatus.lastChecked 
+                ? `Last checked: ${new Date(connectionStatus.lastChecked).toLocaleTimeString()}`
+                : 'Never checked'}
+            </p>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={checkConnectionStatus}
+              disabled={checkingConnection}
+            >
+              <RefreshCw className={`h-4 w-4 mr-1 ${checkingConnection ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Phone Configuration */}
       <Card>
         <CardHeader>
@@ -271,24 +483,6 @@ export default function TwilioSettings({ company, onUpdate }: TwilioSettingsProp
             )}
             <p className="text-xs text-muted-foreground">
               Calls will be forwarded here during escalation or after-hours (if configured)
-            </p>
-          </div>
-
-          {/* Webhook URL */}
-          <div className="space-y-2">
-            <Label>Webhook URL</Label>
-            <div className="flex gap-2">
-              <Input
-                value={generateWebhookUrl()}
-                readOnly
-                className="font-mono text-sm bg-muted"
-              />
-              <Button variant="outline" size="icon" onClick={copyWebhookUrl}>
-                {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Configure this URL in your Twilio console for incoming calls
             </p>
           </div>
 
@@ -365,6 +559,146 @@ export default function TwilioSettings({ company, onUpdate }: TwilioSettingsProp
             {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
             Save Settings
           </Button>
+        </CardContent>
+      </Card>
+
+      {/* Webhook Configuration & Testing */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <TestTube2 className="h-5 w-5" />
+            Webhook Configuration
+          </CardTitle>
+          <CardDescription>
+            Configure and test your Twilio webhook URL
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Webhook URL */}
+          <div className="space-y-2">
+            <Label>Webhook URL</Label>
+            <div className="flex gap-2">
+              <Input
+                value={generateWebhookUrl()}
+                readOnly
+                className="font-mono text-sm bg-muted"
+              />
+              <Button variant="outline" size="icon" onClick={copyWebhookUrl}>
+                {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Configure this URL in your Twilio console for incoming calls
+            </p>
+          </div>
+
+          <Separator />
+
+          {/* Test Webhook */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label>Test Webhook Connection</Label>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={testWebhook}
+                disabled={testing || !twilioNumber}
+              >
+                {testing ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <TestTube2 className="h-4 w-4 mr-2" />
+                )}
+                Test Webhook
+              </Button>
+            </div>
+
+            {testResult && (
+              <div className={`p-4 rounded-lg border ${
+                testResult.success 
+                  ? 'bg-success-muted border-success/20' 
+                  : 'bg-destructive/10 border-destructive/20'
+              }`}>
+                <div className="flex items-start gap-3">
+                  {testResult.success ? (
+                    <CheckCircle2 className="h-5 w-5 text-success shrink-0 mt-0.5" />
+                  ) : (
+                    <XCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+                  )}
+                  <div className="flex-1">
+                    <p className="font-medium text-sm">
+                      {testResult.success ? 'Test Passed' : 'Test Failed'}
+                    </p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {testResult.message}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      {new Date(testResult.timestamp).toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+
+                {testResult.twimlResponse && (
+                  <Collapsible open={showTwimlResponse} onOpenChange={setShowTwimlResponse}>
+                    <CollapsibleTrigger asChild>
+                      <Button variant="ghost" size="sm" className="mt-3 w-full">
+                        {showTwimlResponse ? 'Hide' : 'Show'} TwiML Response
+                      </Button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <ScrollArea className="h-48 mt-2">
+                        <pre className="text-xs font-mono p-3 rounded bg-muted whitespace-pre-wrap">
+                          {testResult.twimlResponse}
+                        </pre>
+                      </ScrollArea>
+                    </CollapsibleContent>
+                  </Collapsible>
+                )}
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Debug Mode */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Bug className="h-5 w-5" />
+            Debug Mode
+          </CardTitle>
+          <CardDescription>
+            Enable detailed logging for troubleshooting call issues
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label>Enable Call Debug Mode</Label>
+              <p className="text-sm text-muted-foreground">
+                Store full Twilio payloads and TwiML responses in audit logs
+              </p>
+            </div>
+            <Switch
+              checked={config.debug_mode}
+              onCheckedChange={(checked) => setConfig({ ...config, debug_mode: checked })}
+            />
+          </div>
+
+          {config.debug_mode && (
+            <div className="p-3 rounded-lg bg-warning-muted border border-warning/20">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-warning-muted-foreground">Debug Mode Active</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Full webhook payloads and TwiML responses will be stored in the audit log. 
+                    This may include sensitive caller information. Disable when not troubleshooting.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -463,7 +797,7 @@ export default function TwilioSettings({ company, onUpdate }: TwilioSettingsProp
             <div className="flex items-center gap-2 p-3 rounded-lg bg-warning-muted border border-warning/20 text-sm">
               <AlertTriangle className="h-4 w-4 text-warning shrink-0" />
               <span className="text-warning-muted-foreground">
-                Set a fallback phone number to enable call forwarding for escalations
+                No fallback number configured. Escalations and after-hours forwards will go to voicemail instead.
               </span>
             </div>
           )}
