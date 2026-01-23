@@ -474,6 +474,100 @@ export type Database = {
         }
         Relationships: []
       }
+      subscriptions: {
+        Row: {
+          calls_limit: number
+          company_id: string
+          created_at: string
+          current_period_end: string | null
+          current_period_start: string | null
+          id: string
+          minutes_limit: number
+          plan: string
+          status: string
+          stripe_customer_id: string | null
+          stripe_subscription_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          calls_limit?: number
+          company_id: string
+          created_at?: string
+          current_period_end?: string | null
+          current_period_start?: string | null
+          id?: string
+          minutes_limit?: number
+          plan?: string
+          status?: string
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          calls_limit?: number
+          company_id?: string
+          created_at?: string
+          current_period_end?: string | null
+          current_period_start?: string | null
+          id?: string
+          minutes_limit?: number
+          plan?: string
+          status?: string
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "subscriptions_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      usage: {
+        Row: {
+          calls_count: number
+          company_id: string
+          created_at: string
+          id: string
+          minutes_count: number
+          month: string
+          overage_cents: number
+          updated_at: string
+        }
+        Insert: {
+          calls_count?: number
+          company_id: string
+          created_at?: string
+          id?: string
+          minutes_count?: number
+          month: string
+          overage_cents?: number
+          updated_at?: string
+        }
+        Update: {
+          calls_count?: number
+          company_id?: string
+          created_at?: string
+          id?: string
+          minutes_count?: number
+          month?: string
+          overage_cents?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "usage_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           created_at: string
