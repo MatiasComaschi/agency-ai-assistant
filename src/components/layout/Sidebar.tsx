@@ -12,6 +12,10 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  FileText,
+  Upload,
+  Headphones,
+  History,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -20,6 +24,10 @@ import { useState } from 'react';
 
 const navItems = [
   { label: 'Agency Dashboard', icon: LayoutDashboard, path: '/agency', adminOnly: true },
+  { label: 'Templates', icon: FileText, path: '/agency/templates', adminOnly: true },
+  { label: 'Bulk Import', icon: Upload, path: '/agency/bulk-import', adminOnly: true },
+  { label: 'Support Console', icon: Headphones, path: '/agency/support', adminOnly: true },
+  { label: 'Audit Log', icon: History, path: '/agency/audit-log', adminOnly: true },
   { label: 'Company Overview', icon: Building2, path: '/company' },
   { label: 'AI Receptionist', icon: Bot, path: '/ai-receptionist' },
   { label: 'Knowledge Base', icon: BookOpen, path: '/knowledge-base' },
