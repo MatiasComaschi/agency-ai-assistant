@@ -21,6 +21,7 @@ import IndustryTemplates from "@/pages/IndustryTemplates";
 import BulkImport from "@/pages/BulkImport";
 import SupportConsole from "@/pages/SupportConsole";
 import AuditLog from "@/pages/AuditLog";
+import Monitoring from "@/pages/Monitoring";
 
 const queryClient = new QueryClient();
 
@@ -48,6 +49,7 @@ const App = () => (
               <Route path="team" element={<Team />} />
               <Route path="integrations" element={<Integrations />} />
               <Route path="billing" element={<Billing />} />
+              <Route path="monitoring" element={<Monitoring />} />
               <Route path="settings" element={<Settings />} />
             </Route>
             <Route path="*" element={<NotFound />} />
