@@ -43,7 +43,7 @@ export default function Team() {
   const [isLoading, setIsLoading] = useState(true);
   const [isOpen, setIsOpen] = useState(false);
   const [email, setEmail] = useState('');
-  const [role, setRole] = useState<AppRole>('company_staff');
+  const [role, setRole] = useState<'company_owner' | 'company_staff'>('company_staff');
   const [isInviting, setIsInviting] = useState(false);
   
   // Remove confirmation
@@ -218,7 +218,7 @@ export default function Team() {
               </div>
               <div className="space-y-2">
                 <Label>Role</Label>
-                <Select value={role} onValueChange={(v) => setRole(v as AppRole)}>
+                <Select value={role} onValueChange={(v) => setRole(v as 'company_owner' | 'company_staff')}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="company_owner">Owner</SelectItem>
@@ -272,14 +272,14 @@ export default function Team() {
                   </div>
                   <div className="flex items-center gap-3">
                     <Select 
-                      value={member.role} 
+                      value={member.role === 'agency_admin' ? 'company_owner' : member.role} 
                       onValueChange={(v) => updateRole(member, v as AppRole)}
+                      disabled={member.role === 'agency_admin'}
                     >
                       <SelectTrigger className="w-32">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="agency_admin">Admin</SelectItem>
                         <SelectItem value="company_owner">Owner</SelectItem>
                         <SelectItem value="company_staff">Staff</SelectItem>
                       </SelectContent>

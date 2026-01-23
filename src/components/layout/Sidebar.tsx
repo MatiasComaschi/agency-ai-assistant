@@ -21,6 +21,7 @@ import {
   Gift,
   MessageSquare,
   Palette,
+  Shield,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -33,6 +34,7 @@ const navItems = [
   { label: 'Bulk Import', icon: Upload, path: '/agency/bulk-import', adminOnly: true },
   { label: 'Support Console', icon: Headphones, path: '/agency/support', adminOnly: true },
   { label: 'Audit Log', icon: History, path: '/agency/audit-log', adminOnly: true },
+  { label: 'Admin Settings', icon: Shield, path: '/agency/admin-settings', adminOnly: true },
   { label: 'Company Overview', icon: Building2, path: '/company' },
   { label: 'AI Receptionist', icon: Bot, path: '/ai-receptionist' },
   { label: 'Knowledge Base', icon: BookOpen, path: '/knowledge-base' },

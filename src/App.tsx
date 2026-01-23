@@ -26,6 +26,7 @@ import ROIReport from "@/pages/ROIReport";
 import Referrals from "@/pages/Referrals";
 import Testimonials from "@/pages/Testimonials";
 import WhiteLabel from "@/pages/WhiteLabel";
+import AdminSettings from "@/pages/AdminSettings";
 
 const queryClient = new QueryClient();
 
@@ -46,6 +47,7 @@ const App = () => (
               <Route path="agency/bulk-import" element={<BulkImport />} />
               <Route path="agency/support" element={<SupportConsole />} />
               <Route path="agency/audit-log" element={<AuditLog />} />
+              <Route path="agency/admin-settings" element={<AdminSettings />} />
               <Route path="company" element={<CompanyOverview />} />
               <Route path="ai-receptionist" element={<AIReceptionist />} />
               <Route path="knowledge-base" element={<KnowledgeBase />} />

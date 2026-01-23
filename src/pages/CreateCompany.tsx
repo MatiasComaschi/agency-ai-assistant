@@ -200,11 +200,11 @@ export default function CreateCompany() {
 
       const companyId = companyData.id;
 
-      // 2. Create membership for current user as agency_admin
+      // 2. Create membership for current user as company_owner (not agency_admin - that's global via user_roles)
       await supabase.from('memberships').insert({
         user_id: user.id,
         company_id: companyId,
-        role: 'agency_admin',
+        role: 'company_owner',
       });
 
       // 3. Create business hours
