@@ -19,6 +19,7 @@ export type Database = {
           after_hours_script: string | null
           allowed_actions_json: Json | null
           company_id: string
+          disclosure_required: boolean
           disclosure_script: string | null
           escalation_rules_json: Json | null
           greeting_script: string | null
@@ -33,6 +34,7 @@ export type Database = {
           after_hours_script?: string | null
           allowed_actions_json?: Json | null
           company_id: string
+          disclosure_required?: boolean
           disclosure_script?: string | null
           escalation_rules_json?: Json | null
           greeting_script?: string | null
@@ -47,6 +49,7 @@ export type Database = {
           after_hours_script?: string | null
           allowed_actions_json?: Json | null
           company_id?: string
+          disclosure_required?: boolean
           disclosure_script?: string | null
           escalation_rules_json?: Json | null
           greeting_script?: string | null
@@ -172,6 +175,7 @@ export type Database = {
       }
       companies: {
         Row: {
+          ai_enabled: boolean
           booking_link: string | null
           created_at: string
           fallback_phone: string | null
@@ -185,6 +189,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          ai_enabled?: boolean
           booking_link?: string | null
           created_at?: string
           fallback_phone?: string | null
@@ -198,6 +203,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          ai_enabled?: boolean
           booking_link?: string | null
           created_at?: string
           fallback_phone?: string | null
@@ -540,6 +546,33 @@ export type Database = {
         }
         Relationships: []
       }
+      rate_limits: {
+        Row: {
+          created_at: string
+          endpoint: string
+          id: string
+          identifier: string
+          request_count: number
+          window_start: string
+        }
+        Insert: {
+          created_at?: string
+          endpoint: string
+          id?: string
+          identifier: string
+          request_count?: number
+          window_start?: string
+        }
+        Update: {
+          created_at?: string
+          endpoint?: string
+          id?: string
+          identifier?: string
+          request_count?: number
+          window_start?: string
+        }
+        Relationships: []
+      }
       subscriptions: {
         Row: {
           calls_limit: number
@@ -654,6 +687,44 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      webhook_metrics: {
+        Row: {
+          company_id: string
+          created_at: string
+          endpoint: string
+          error_message: string | null
+          id: string
+          latency_ms: number
+          success: boolean
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          endpoint: string
+          error_message?: string | null
+          id?: string
+          latency_ms?: number
+          success?: boolean
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          endpoint?: string
+          error_message?: string | null
+          id?: string
+          latency_ms?: number
+          success?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "webhook_metrics_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {

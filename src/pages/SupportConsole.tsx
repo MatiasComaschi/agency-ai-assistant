@@ -47,9 +47,13 @@ import { format } from 'date-fns';
 import type { Call, Company } from '@/types';
 
 interface CallWithCompany extends Call {
-  company?: Company;
+  company?: Company & { ai_enabled?: boolean };
   duration_seconds?: number;
   sentiment?: string;
+}
+
+interface CompanyWithAI extends Company {
+  ai_enabled?: boolean;
 }
 
 export default function SupportConsole() {
@@ -57,7 +61,7 @@ export default function SupportConsole() {
   const navigate = useNavigate();
   
   const [calls, setCalls] = useState<CallWithCompany[]>([]);
-  const [companies, setCompanies] = useState<Company[]>([]);
+  const [companies, setCompanies] = useState<CompanyWithAI[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterRisk, setFilterRisk] = useState<'all' | 'high'>('all');
@@ -75,14 +79,14 @@ export default function SupportConsole() {
   const fetchData = async () => {
     setIsLoading(true);
     
-    // Fetch companies
+    // Fetch companies with ai_enabled
     const { data: companiesData } = await supabase
       .from('companies')
       .select('*')
       .order('name');
     
     if (companiesData) {
-      setCompanies(companiesData as unknown as Company[]);
+      setCompanies(companiesData as unknown as CompanyWithAI[]);
     }
 
     // Fetch all calls with company info
@@ -107,7 +111,8 @@ export default function SupportConsole() {
     setIsLoading(false);
   };
 
-  const toggleCompanyStatus = async (company: Company) => {
+  // Toggle company status (pause/resume)
+  const toggleCompanyStatus = async (company: CompanyWithAI) => {
     const newStatus = company.status === 'active' ? 'paused' : 'active';
     
     const { error } = await supabase
@@ -119,6 +124,26 @@ export default function SupportConsole() {
       toast.error('Failed to update status');
     } else {
       toast.success(`${company.name} is now ${newStatus}`);
+      fetchData();
+    }
+  };
+
+  // Toggle AI enabled (panic switch)
+  const toggleAIEnabled = async (company: CompanyWithAI) => {
+    const newEnabled = company.ai_enabled === false ? true : false;
+    
+    const { error } = await supabase
+      .from('companies')
+      .update({ ai_enabled: newEnabled })
+      .eq('id', company.id);
+
+    if (error) {
+      toast.error('Failed to toggle AI');
+    } else {
+      toast.success(newEnabled 
+        ? `AI enabled for ${company.name}` 
+        : `AI disabled for ${company.name} - calls will forward`
+      );
       fetchData();
     }
   };
@@ -244,7 +269,16 @@ export default function SupportConsole() {
                     {company.name}
                   </span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
+                  {/* AI Toggle (Panic Switch) */}
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs text-muted-foreground">AI</span>
+                    <Switch
+                      checked={company.ai_enabled !== false}
+                      onCheckedChange={() => toggleAIEnabled(company)}
+                      className="scale-75"
+                    />
+                  </div>
                   <Badge variant={company.status === 'active' ? 'default' : 'secondary'}>
                     {company.status}
                   </Badge>

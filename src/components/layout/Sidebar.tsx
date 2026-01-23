@@ -16,6 +16,7 @@ import {
   Upload,
   Headphones,
   History,
+  Activity,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -35,6 +36,7 @@ const navItems = [
   { label: 'Team', icon: Users, path: '/team' },
   { label: 'Integrations', icon: Puzzle, path: '/integrations' },
   { label: 'Billing', icon: CreditCard, path: '/billing' },
+  { label: 'Monitoring', icon: Activity, path: '/monitoring' },
   { label: 'Settings', icon: Settings, path: '/settings' },
 ];
 
