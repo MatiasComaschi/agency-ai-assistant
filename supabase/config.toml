@@ -5,3 +5,18 @@ verify_jwt = false
 
 [functions.integrations]
 verify_jwt = false
+
+[functions.twilio-voice-inbound]
+verify_jwt = false
+
+[functions.twilio-voice-escalate]
+verify_jwt = false
+
+[functions.twilio-voice-voicemail]
+verify_jwt = false
+
+[functions.twilio-voice-dial-complete]
+verify_jwt = false
+
+[functions.twilio-voice-conversation]
+verify_jwt = false
