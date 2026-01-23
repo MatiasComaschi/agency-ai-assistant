@@ -144,11 +144,18 @@ function sanitizeString(input: string, maxLength = 1000): string {
   return input.trim().substring(0, maxLength).replace(/\0/g, "").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
 }
 
+// CORS headers for browser requests
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+};
+
 // TwiML helper functions
 const twimlResponse = (body: string): Response => {
   return new Response(
     `<?xml version="1.0" encoding="UTF-8"?><Response>${body}</Response>`,
-    { headers: { "Content-Type": "application/xml" } }
+    { headers: { ...corsHeaders, "Content-Type": "application/xml" } }
   );
 };
 
@@ -327,6 +334,11 @@ const incrementUsage = async (supabase: any, companyId: string): Promise<void> =
 };
 
 Deno.serve(async (req) => {
+  // Handle CORS preflight requests
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
   const startTime = Date.now();
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -337,7 +349,7 @@ Deno.serve(async (req) => {
   let rawParams: Record<string, string> = {};
 
   try {
-    // Parse form data from Twilio
+    // Parse form data from Twilio or JSON for test calls
     const contentType = req.headers.get("content-type") || "";
 
     if (contentType.includes("application/x-www-form-urlencoded")) {
@@ -347,6 +359,17 @@ Deno.serve(async (req) => {
       }
     } else if (contentType.includes("application/json")) {
       rawParams = await req.json();
+    } else {
+      // Try to parse as form data anyway (Twilio default)
+      try {
+        const text = await req.text();
+        const params = new URLSearchParams(text);
+        for (const [key, value] of params.entries()) {
+          rawParams[key] = value;
+        }
+      } catch {
+        console.warn("[twilio-voice-inbound] Could not parse request body");
+      }
     }
 
     // Log raw incoming request
