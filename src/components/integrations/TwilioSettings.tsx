@@ -305,58 +305,44 @@ export default function TwilioSettings({ company, onUpdate }: TwilioSettingsProp
     try {
       const normalizedNumber = normalizeToE164(twilioNumber);
       
-      // Create a mock Twilio payload
-      const mockPayload: Record<string, string> = {
-        CallSid: `CA${Date.now().toString(16).padStart(32, '0')}`,
-        From: '+15551234567',
-        To: normalizedNumber,
-        Called: normalizedNumber,
-        Caller: '+15551234567',
-        CallStatus: 'ringing',
-        Direction: 'inbound',
-        _test: 'true', // Flag to indicate this is a test
-      };
-
-      const webhookUrl = generateWebhookUrl();
-      
-      // Send test request to webhook
-      const response = await fetch(webhookUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
+      // Call the server-to-server test endpoint (avoids CORS issues)
+      const { data, error } = await supabase.functions.invoke('twilio-webhook-test', {
+        body: {
+          companyId: company.id,
+          twilioNumber: normalizedNumber,
         },
-        body: new URLSearchParams(mockPayload as Record<string, string>).toString(),
       });
 
-      const responseText = await response.text();
-      
-      if (response.ok && responseText.includes('<Response>')) {
-        // Check if it matched our company
-        const isError = responseText.includes('not configured') || responseText.includes('technical difficulties');
-        
-        setTestResult({
-          success: !isError,
-          status: isError ? 'no_match' : 'matched_company',
-          message: isError 
+      if (error) {
+        throw new Error(error.message || 'Failed to invoke test function');
+      }
+
+      const result = data as {
+        ok: boolean;
+        status: 'matched_company' | 'no_match' | 'error';
+        httpStatus?: number;
+        twimlText?: string;
+        error?: string;
+        timestamp: string;
+      };
+
+      setTestResult({
+        success: result.ok,
+        status: result.status,
+        message: result.ok 
+          ? 'Webhook is working! Company matched successfully.'
+          : result.status === 'no_match'
             ? 'Webhook responded but company not matched. Check that your Twilio number is saved correctly.'
-            : 'Webhook is working! Company matched successfully.',
-          twimlResponse: responseText,
-          timestamp: new Date().toISOString(),
-        });
-        
-        if (!isError) {
-          toast.success('Webhook test passed!');
-        } else {
-          toast.warning('Webhook responded but company not matched');
-        }
+            : result.error || 'Webhook test failed',
+        twimlResponse: result.twimlText,
+        timestamp: result.timestamp,
+      });
+
+      if (result.ok) {
+        toast.success('Webhook test passed!');
+      } else if (result.status === 'no_match') {
+        toast.warning('Webhook responded but company not matched');
       } else {
-        setTestResult({
-          success: false,
-          status: 'error',
-          message: `Webhook returned status ${response.status}`,
-          twimlResponse: responseText,
-          timestamp: new Date().toISOString(),
-        });
         toast.error('Webhook test failed');
       }
     } catch (error) {
