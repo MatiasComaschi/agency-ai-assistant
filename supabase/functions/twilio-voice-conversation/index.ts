@@ -1,15 +1,42 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.2";
 
-// TwiML helper functions
-const twimlResponse = (body: string): Response => {
-  return new Response(
-    `<?xml version="1.0" encoding="UTF-8"?><Response>${body}</Response>`,
-    {
-      headers: { "Content-Type": "application/xml" },
-    }
+// CORS headers for preflight
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+};
+
+// XML escape - MUST be called on all dynamic text
+const escapeXml = (text: string): string => {
+  if (!text) return "";
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+};
+
+// Build valid TwiML response - ALWAYS returns text/xml
+const buildTwimlResponse = (body: string): Response => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?><Response>${body}</Response>`;
+  return new Response(xml, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/xml; charset=utf-8",
+    },
+  });
+};
+
+// Error TwiML - fallback for any failure
+const buildErrorTwiml = (): Response => {
+  return buildTwimlResponse(
+    `<Say voice="Polly.Joanna">Sorry, we're having trouble right now. Please try again later.</Say><Hangup />`
   );
 };
 
+// TwiML helper functions
 const say = (text: string, voice = "Polly.Joanna"): string => {
   return `<Say voice="${voice}">${escapeXml(text)}</Say>`;
 };
@@ -23,25 +50,41 @@ const gather = (options: {
   innerTwiml?: string;
 }): string => {
   const attrs = [
-    `action="${options.action}"`,
+    `action="${escapeXml(options.action)}"`,
     `input="${options.input || "speech"}"`,
     `timeout="${options.timeout || 3}"`,
     `speechTimeout="${options.speechTimeout || "auto"}"`,
   ];
   if (options.hints) {
-    attrs.push(`hints="${options.hints}"`);
+    attrs.push(`hints="${escapeXml(options.hints)}"`);
   }
   return `<Gather ${attrs.join(" ")}>${options.innerTwiml || ""}</Gather>`;
 };
 
-const escapeXml = (text: string): string => {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-};
+// Audit logging
+// deno-lint-ignore no-explicit-any
+async function logAudit(
+  supabase: any,
+  companyId: string | null,
+  action: string,
+  entityType: string,
+  entityId: string | null,
+  metadata: Record<string, unknown>
+): Promise<void> {
+  try {
+    const systemUserId = "00000000-0000-0000-0000-000000000000";
+    await supabase.from("audits").insert({
+      actor_user_id: systemUserId,
+      company_id: companyId || "00000000-0000-0000-0000-000000000000",
+      action,
+      entity_type: entityType,
+      entity_id: entityId,
+      metadata,
+    });
+  } catch (err) {
+    console.error("[twilio-voice-conversation] Audit log error:", err);
+  }
+}
 
 // Escalation triggers
 const ESCALATION_KEYWORDS = [
@@ -182,12 +225,64 @@ interface ExtractedJson {
   [key: string]: unknown;
 }
 
-Deno.serve(async (req) => {
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const lovableApiKey = Deno.env.get("LOVABLE_API_KEY");
-  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+// Parse Twilio form data from request
+async function parseTwilioParams(req: Request): Promise<Record<string, string>> {
+  const params: Record<string, string> = {};
+  const contentType = req.headers.get("content-type") || "";
 
+  try {
+    if (contentType.includes("application/x-www-form-urlencoded")) {
+      const formData = await req.formData();
+      for (const [key, value] of formData.entries()) {
+        params[key] = value.toString();
+      }
+    } else if (contentType.includes("application/json")) {
+      const json = await req.json();
+      for (const key in json) {
+        params[key] = String(json[key]);
+      }
+    } else {
+      const text = await req.text();
+      if (text) {
+        const urlParams = new URLSearchParams(text);
+        for (const [key, value] of urlParams.entries()) {
+          params[key] = value;
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[twilio-voice-conversation] Error parsing request body:", err);
+  }
+
+  return params;
+}
+
+Deno.serve(async (req) => {
+  // Handle CORS preflight
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 200, headers: corsHeaders });
+  }
+
+  // Initialize Supabase
+  let supabase;
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    
+    if (!supabaseUrl || !supabaseServiceKey) {
+      console.error("[twilio-voice-conversation] Missing Supabase credentials");
+      return buildErrorTwiml();
+    }
+    
+    supabase = createClient(supabaseUrl, supabaseServiceKey);
+  } catch (err) {
+    console.error("[twilio-voice-conversation] Failed to create Supabase client:", err);
+    return buildErrorTwiml();
+  }
+
+  const lovableApiKey = Deno.env.get("LOVABLE_API_KEY");
+
+  // MASTER try/catch - ensures we ALWAYS return valid TwiML
   try {
     // Parse URL params
     const url = new URL(req.url);
@@ -197,44 +292,37 @@ Deno.serve(async (req) => {
     const bookingStep = url.searchParams.get("booking_step");
 
     // Parse form data from Twilio
-    const contentType = req.headers.get("content-type") || "";
-    let params: Record<string, string> = {};
-
-    if (contentType.includes("application/x-www-form-urlencoded")) {
-      const formData = await req.formData();
-      for (const [key, value] of formData.entries()) {
-        params[key] = value.toString();
-      }
-    } else if (contentType.includes("application/json")) {
-      params = await req.json();
-    }
+    const params = await parseTwilioParams(req);
 
     const speechResult = params.SpeechResult || "";
     const confidence = parseFloat(params.Confidence || "0");
     const callerNumber = params.From || params.Caller || "";
+    const callSid = params.CallSid || "";
 
-    console.log("[twilio-voice-conversation] Processing speech:", {
+    console.log("[twilio-voice-conversation] ====== CONVERSATION TURN ======");
+    console.log("[twilio-voice-conversation] Processing:", {
       callId,
       companyId,
       turnCount,
       bookingStep,
       speechResult: speechResult.substring(0, 100),
       confidence,
+      callSid,
     });
 
     if (!companyId) {
       console.error("[twilio-voice-conversation] Missing company_id");
-      return twimlResponse(
+      return buildTwimlResponse(
         say("We're sorry, but we cannot process your request. Goodbye.") +
         `<Hangup />`
       );
     }
 
     // Build base URLs
-    const baseUrl = supabaseUrl.replace("/rest/v1", "");
-    const functionsBase = `${baseUrl}/functions/v1`;
-    const escalateUrl = `${functionsBase}/twilio-voice-escalate?call_id=${callId}&company_id=${companyId}`;
-    const nextTurnUrl = `${functionsBase}/twilio-voice-conversation?call_id=${callId}&company_id=${companyId}&turn=${turnCount + 1}`;
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const functionsBase = `${supabaseUrl}/functions/v1`;
+    const escalateUrl = `${functionsBase}/twilio-voice-escalate?call_id=${encodeURIComponent(callId || callSid)}&company_id=${encodeURIComponent(companyId)}`;
+    const nextTurnUrl = `${functionsBase}/twilio-voice-conversation?call_id=${encodeURIComponent(callId || callSid)}&company_id=${encodeURIComponent(companyId)}&turn=${turnCount + 1}`;
 
     // Fetch company and AI profile
     const { data: company } = await supabase
@@ -283,6 +371,13 @@ Deno.serve(async (req) => {
       if (escalationCheck.escalate) {
         console.log("[twilio-voice-conversation] Escalating:", escalationCheck.reason);
 
+        // Log audit for escalation
+        await logAudit(supabase, companyId, "conversation_escalate", "twilio_conversation", callId, {
+          turn: turnCount,
+          escalation_reason: escalationCheck.reason,
+          last_user_utterance: speechResult.substring(0, 500),
+        });
+
         if (callId) {
           const { data: existingCall } = await supabase
             .from("calls")
@@ -305,9 +400,9 @@ Deno.serve(async (req) => {
             .eq("id", callId);
         }
 
-        return twimlResponse(
+        return buildTwimlResponse(
           say("I understand. Let me transfer you to a team member who can better assist you.") +
-          `<Redirect>${escalateUrl}&amp;reason=${escalationCheck.reason}</Redirect>`
+          `<Redirect>${escapeXml(escalateUrl)}&amp;reason=${escalationCheck.reason}</Redirect>`
         );
       }
     }
@@ -322,7 +417,14 @@ Deno.serve(async (req) => {
         
         // Check if booking is allowed
         if (!allowedActions.booking) {
-          return twimlResponse(
+          await logAudit(supabase, companyId, "conversation_turn", "twilio_conversation", callId, {
+            turn: turnCount,
+            last_user_utterance: speechResult.substring(0, 500),
+            last_ai_response: "I'm sorry, but I'm not able to schedule appointments at this time.",
+            booking_blocked: true,
+          });
+
+          return buildTwimlResponse(
             gather({
               action: nextTurnUrl,
               input: "speech",
@@ -337,7 +439,14 @@ Deno.serve(async (req) => {
 
         // Check if company has booking capability
         if (!company?.booking_link) {
-          return twimlResponse(
+          await logAudit(supabase, companyId, "conversation_turn", "twilio_conversation", callId, {
+            turn: turnCount,
+            last_user_utterance: speechResult.substring(0, 500),
+            last_ai_response: "Let me transfer you to someone who can assist with booking.",
+            booking_escalated: true,
+          });
+
+          return buildTwimlResponse(
             gather({
               action: nextTurnUrl,
               input: "speech",
@@ -345,7 +454,7 @@ Deno.serve(async (req) => {
               speechTimeout: "auto",
               innerTwiml: say("I'd be happy to help you schedule an appointment. Let me transfer you to someone who can assist with booking."),
             }) +
-            `<Redirect>${escalateUrl}&amp;reason=booking_request</Redirect>`
+            `<Redirect>${escapeXml(escalateUrl)}&amp;reason=booking_request</Redirect>`
           );
         }
 
@@ -378,16 +487,25 @@ Deno.serve(async (req) => {
             .eq("id", callId);
         }
 
+        const firstQuestion = `Great! I can help you book a ${bookingTemplate.serviceName}. ${bookingTemplate.questions[0]}`;
+
+        await logAudit(supabase, companyId, "conversation_turn", "twilio_conversation", callId, {
+          turn: turnCount,
+          last_user_utterance: speechResult.substring(0, 500),
+          last_ai_response: firstQuestion,
+          booking_started: true,
+        });
+
         // Ask first booking question
-        const bookingUrl = `${functionsBase}/twilio-voice-conversation?call_id=${callId}&company_id=${companyId}&turn=${turnCount + 1}&booking_step=1`;
-        return twimlResponse(
+        const bookingUrl = `${functionsBase}/twilio-voice-conversation?call_id=${encodeURIComponent(callId || callSid)}&company_id=${encodeURIComponent(companyId)}&turn=${turnCount + 1}&booking_step=1`;
+        return buildTwimlResponse(
           gather({
             action: bookingUrl,
             input: "speech",
             timeout: 8,
             speechTimeout: "auto",
             hints: bookingTemplate.keywords.join(", "),
-            innerTwiml: say(`Great! I can help you book a ${bookingTemplate.serviceName}. ${bookingTemplate.questions[0]}`),
+            innerTwiml: say(firstQuestion),
           }) +
           say("I didn't catch that. " + bookingTemplate.questions[0]) +
           `<Hangup />`
@@ -411,7 +529,7 @@ Deno.serve(async (req) => {
               bookingFlowState.phone_confirmed = callerNumber;
             } else {
               // They said no, ask for correct number
-              const phoneUrl = `${functionsBase}/twilio-voice-conversation?call_id=${callId}&company_id=${companyId}&turn=${turnCount + 1}&booking_step=4`;
+              const phoneUrl = `${functionsBase}/twilio-voice-conversation?call_id=${encodeURIComponent(callId || callSid)}&company_id=${encodeURIComponent(companyId)}&turn=${turnCount + 1}&booking_step=4`;
               
               if (callId) {
                 const { data: existingCall } = await supabase
@@ -435,7 +553,14 @@ Deno.serve(async (req) => {
                   .eq("id", callId);
               }
 
-              return twimlResponse(
+              await logAudit(supabase, companyId, "conversation_turn", "twilio_conversation", callId, {
+                turn: turnCount,
+                last_user_utterance: speechResult.substring(0, 500),
+                last_ai_response: "What number should I send the booking link to?",
+                booking_step: currentStep,
+              });
+
+              return buildTwimlResponse(
                 gather({
                   action: phoneUrl,
                   input: "dtmf speech",
@@ -444,7 +569,7 @@ Deno.serve(async (req) => {
                   innerTwiml: say("No problem. What phone number should I send the booking link to? You can say or dial the number."),
                 }) +
                 say("I didn't get that number. Let me transfer you to someone who can help.") +
-                `<Redirect>${escalateUrl}&amp;reason=phone_collection_failed</Redirect>`
+                `<Redirect>${escapeXml(escalateUrl)}&amp;reason=phone_collection_failed</Redirect>`
               );
             }
           } else if (currentStep === 4) {
@@ -488,32 +613,51 @@ Deno.serve(async (req) => {
         
         if (currentStep < totalQuestions) {
           // Ask next question
-          const nextBookingUrl = `${functionsBase}/twilio-voice-conversation?call_id=${callId}&company_id=${companyId}&turn=${turnCount + 1}&booking_step=${currentStep + 1}`;
-          return twimlResponse(
+          const nextQuestion = `Got it. ${bookingTemplate.questions[currentStep]}`;
+          
+          await logAudit(supabase, companyId, "conversation_turn", "twilio_conversation", callId, {
+            turn: turnCount,
+            last_user_utterance: speechResult.substring(0, 500),
+            last_ai_response: nextQuestion,
+            booking_step: currentStep,
+          });
+
+          const nextBookingUrl = `${functionsBase}/twilio-voice-conversation?call_id=${encodeURIComponent(callId || callSid)}&company_id=${encodeURIComponent(companyId)}&turn=${turnCount + 1}&booking_step=${currentStep + 1}`;
+          return buildTwimlResponse(
             gather({
               action: nextBookingUrl,
               input: "speech",
               timeout: 8,
               speechTimeout: "auto",
               hints: bookingTemplate.keywords.join(", "),
-              innerTwiml: say(`Got it. ${bookingTemplate.questions[currentStep]}`),
+              innerTwiml: say(nextQuestion),
             }) +
             say("I didn't catch that. " + bookingTemplate.questions[currentStep]) +
             `<Hangup />`
           );
         } else if (currentStep === totalQuestions && !bookingFlowState.phone_confirmed) {
           // Confirm phone number for SMS
-          const phoneConfirmUrl = `${functionsBase}/twilio-voice-conversation?call_id=${callId}&company_id=${companyId}&turn=${turnCount + 1}&booking_step=3`;
+          const phoneConfirmUrl = `${functionsBase}/twilio-voice-conversation?call_id=${encodeURIComponent(callId || callSid)}&company_id=${encodeURIComponent(companyId)}&turn=${turnCount + 1}&booking_step=3`;
           const formattedPhone = callerNumber.replace(/^\+1/, "").replace(/(\d{3})(\d{3})(\d{4})/, "($1) $2-$3");
           
-          return twimlResponse(
+          const phoneConfirmMessage = `Perfect! I'll send you a booking link via text message. Just to confirm, should I send it to ${formattedPhone}?`;
+
+          await logAudit(supabase, companyId, "conversation_turn", "twilio_conversation", callId, {
+            turn: turnCount,
+            last_user_utterance: speechResult.substring(0, 500),
+            last_ai_response: phoneConfirmMessage,
+            booking_step: currentStep,
+            phone_confirm: true,
+          });
+
+          return buildTwimlResponse(
             gather({
               action: phoneConfirmUrl,
               input: "speech",
               timeout: 5,
               speechTimeout: "auto",
               hints: "yes, no, correct, that's right, wrong number",
-              innerTwiml: say(`Perfect! I'll send you a booking link via text message. Just to confirm, should I send it to ${formattedPhone}?`),
+              innerTwiml: say(phoneConfirmMessage),
             }) +
             say("Should I send the booking link to this number?") +
             `<Hangup />`
@@ -548,6 +692,17 @@ Deno.serve(async (req) => {
             if (smsResponse.ok) {
               console.log("[twilio-voice-conversation] SMS sent successfully:", smsResult.message_sid);
 
+              const successMessage = "I've sent you a text message with the booking link. You should receive it shortly. Is there anything else I can help you with today?";
+
+              await logAudit(supabase, companyId, "conversation_turn", "twilio_conversation", callId, {
+                turn: turnCount,
+                last_user_utterance: speechResult.substring(0, 500),
+                last_ai_response: successMessage,
+                booking_completed: true,
+                sms_sent: true,
+                sms_to: phoneToSend,
+              });
+
               // Update call outcome
               if (callId) {
                 await supabase
@@ -556,29 +711,45 @@ Deno.serve(async (req) => {
                   .eq("id", callId);
               }
 
-              return twimlResponse(
+              return buildTwimlResponse(
                 gather({
                   action: nextTurnUrl,
                   input: "speech",
                   timeout: 5,
                   speechTimeout: "auto",
-                  innerTwiml: say(`I've sent you a text message with the booking link. You should receive it shortly. Is there anything else I can help you with today?`),
+                  innerTwiml: say(successMessage),
                 }) +
                 say("Thank you for calling. Have a great day! Goodbye.") +
                 `<Hangup />`
               );
             } else {
               console.error("[twilio-voice-conversation] SMS send failed:", smsResult);
-              return twimlResponse(
+
+              await logAudit(supabase, companyId, "conversation_turn", "twilio_conversation", callId, {
+                turn: turnCount,
+                last_user_utterance: speechResult.substring(0, 500),
+                last_ai_response: "SMS failed - escalating",
+                sms_error: smsResult,
+              });
+
+              return buildTwimlResponse(
                 say("I apologize, but I wasn't able to send the text message. Let me transfer you to someone who can help you complete your booking.") +
-                `<Redirect>${escalateUrl}&amp;reason=sms_failed</Redirect>`
+                `<Redirect>${escapeXml(escalateUrl)}&amp;reason=sms_failed</Redirect>`
               );
             }
           } catch (smsError) {
             console.error("[twilio-voice-conversation] SMS error:", smsError);
-            return twimlResponse(
+
+            await logAudit(supabase, companyId, "conversation_turn", "twilio_conversation", callId, {
+              turn: turnCount,
+              last_user_utterance: speechResult.substring(0, 500),
+              last_ai_response: "SMS exception - escalating",
+              sms_exception: String(smsError),
+            });
+
+            return buildTwimlResponse(
               say("I apologize, but I'm having trouble sending the text message. Let me transfer you to someone who can help.") +
-              `<Redirect>${escalateUrl}&amp;reason=sms_error</Redirect>`
+              `<Redirect>${escapeXml(escalateUrl)}&amp;reason=sms_error</Redirect>`
             );
           }
         }
@@ -589,15 +760,23 @@ Deno.serve(async (req) => {
     const maxTurns = (escalationRules.escalateAfterMinutes as number) || 5;
     if (turnCount >= maxTurns) {
       console.log("[twilio-voice-conversation] Max turns reached, offering escalation");
-      return twimlResponse(
+
+      await logAudit(supabase, companyId, "conversation_turn", "twilio_conversation", callId, {
+        turn: turnCount,
+        last_user_utterance: speechResult.substring(0, 500),
+        last_ai_response: "Max turns reached - offering escalation",
+        max_turns_reached: true,
+      });
+
+      return buildTwimlResponse(
         gather({
-          action: `${functionsBase}/twilio-voice-conversation?call_id=${callId}&company_id=${companyId}&turn=${turnCount + 1}&offer_escalation=true`,
+          action: `${functionsBase}/twilio-voice-conversation?call_id=${encodeURIComponent(callId || callSid)}&company_id=${encodeURIComponent(companyId)}&turn=${turnCount + 1}&offer_escalation=true`,
           input: "speech",
           timeout: 3,
           speechTimeout: "auto",
           innerTwiml: say("I want to make sure I'm helping you properly. Would you like me to transfer you to a team member, or is there something else I can help you with?"),
         }) +
-        `<Redirect>${escalateUrl}&amp;reason=max_turns</Redirect>`
+        `<Redirect>${escapeXml(escalateUrl)}&amp;reason=max_turns</Redirect>`
       );
     }
 
@@ -640,6 +819,8 @@ ${kbContext || "No specific information available."}
 
 Respond to the caller's question naturally and briefly.`;
 
+        console.log("[twilio-voice-conversation] Calling AI API...");
+        
         const response = await fetch("https://api.lovable.dev/v1/chat/completions", {
           method: "POST",
           headers: {
@@ -667,11 +848,23 @@ Respond to the caller's question naturally and briefly.`;
             .replace(/\*/g, "")
             .replace(/```[\s\S]*?```/g, "")
             .trim();
+          
+          console.log("[twilio-voice-conversation] AI response received:", aiResponse.substring(0, 100));
+        } else {
+          console.error("[twilio-voice-conversation] AI API error:", response.status, await response.text());
         }
       } catch (aiError) {
         console.error("[twilio-voice-conversation] AI error:", aiError);
       }
     }
+
+    // Log the conversation turn
+    await logAudit(supabase, companyId, "conversation_turn", "twilio_conversation", callId, {
+      turn: turnCount,
+      last_user_utterance: speechResult.substring(0, 500),
+      last_ai_response: aiResponse.substring(0, 500),
+      confidence,
+    });
 
     // Update call transcript
     if (callId) {
@@ -692,10 +885,10 @@ Respond to the caller's question naturally and briefly.`;
         .eq("id", callId);
     }
 
-    console.log("[twilio-voice-conversation] AI response:", aiResponse.substring(0, 100));
+    console.log("[twilio-voice-conversation] ====== RESPONDING ======");
 
     // Continue conversation
-    return twimlResponse(
+    return buildTwimlResponse(
       gather({
         action: nextTurnUrl,
         input: "speech",
@@ -709,10 +902,11 @@ Respond to the caller's question naturally and briefly.`;
       `<Hangup />`
     );
   } catch (error) {
-    console.error("[twilio-voice-conversation] Unexpected error:", error);
-    return twimlResponse(
-      say("We're sorry, but we encountered an error. Please try calling back later.") +
-      `<Hangup />`
-    );
+    // CRITICAL: Catch-all error handler - MUST return valid TwiML
+    console.error("[twilio-voice-conversation] ====== UNEXPECTED ERROR ======");
+    console.error("[twilio-voice-conversation] Error:", error);
+    console.error("[twilio-voice-conversation] Stack:", error instanceof Error ? error.stack : "no stack");
+    
+    return buildErrorTwiml();
   }
 });

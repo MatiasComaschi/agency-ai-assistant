@@ -695,7 +695,7 @@ Deno.serve(async (req) => {
 
     // Business hours - AI receptionist flow
     console.log("[twilio-voice-inbound] Business hours - starting AI flow");
-    const conversationAction = `${functionsBase}/twilio-voice-conversation?call_id=${callIdForUrls}&company_id=${companyIdForUrls}`;
+    const conversationAction = `${functionsBase}/twilio-voice-conversation?call_id=${callIdForUrls}&company_id=${companyIdForUrls}&turn=1`;
 
     // Build greeting with optional disclosure
     const greetingTwiml = disclosureRequired 
@@ -713,16 +713,16 @@ Deno.serve(async (req) => {
 
     await recordMetric(supabase, company.id, "twilio-voice-inbound", true, Date.now() - startTime);
 
-    if (debugMode) {
-      await logAudit(supabase, company.id, "twiml_response", "twilio_webhook", twilioCallSid, {
-        outcome: "ai_receptionist",
-        greeting_script: greetingScript,
-        disclosure_required: disclosureRequired,
-        call_id_param: callIdForUrls,
-        conversation_action: conversationAction,
-        twiml_response: twiml,
-      });
-    }
+    // Always log routing decision
+    await logAudit(supabase, company.id, "inbound_routing", "twilio_webhook", twilioCallSid, {
+      routing_decision: "ai_conversation",
+      routing_reason: "business_hours_ai_enabled",
+      greeting_script: greetingScript,
+      disclosure_required: disclosureRequired,
+      call_id_param: callIdForUrls,
+      conversation_action: conversationAction,
+      ...(debugMode ? { twiml_response: twiml } : {}),
+    });
 
     console.log("[twilio-voice-inbound] ====== CALL ROUTED TO AI ======");
     return buildTwimlResponse(twiml);
