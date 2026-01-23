@@ -18,14 +18,16 @@ import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, LineChart, Line, Cart
 interface WeeklyData {
   week: string;
   calls: number;
-  bookings: number;
+  bookingLinksSent: number;
+  confirmedBookings: number;
   revenue: number;
 }
 
 interface ROIMetrics {
   totalCalls: number;
   answeredCalls: number;
-  bookings: number;
+  bookingLinksSent: number;
+  confirmedBookings: number;
   estimatedRevenue: number;
   avgRevenuePerCall: number;
   answerRate: number;
@@ -38,7 +40,8 @@ export default function ROIReport() {
   const [metrics, setMetrics] = useState<ROIMetrics>({
     totalCalls: 0,
     answeredCalls: 0,
-    bookings: 0,
+    bookingLinksSent: 0,
+    confirmedBookings: 0,
     estimatedRevenue: 0,
     avgRevenuePerCall: 0,
     answerRate: 0,
@@ -79,19 +82,27 @@ export default function ROIReport() {
 
       // Calculate metrics
       const totalCalls = calls?.length || 0;
-      const answeredCalls = calls?.filter(c => c.outcome === 'answered' || c.outcome === 'booked').length || 0;
-      const bookings = calls?.filter(c => c.outcome === 'booked').length || 0;
+      const answeredCalls = calls?.filter(c => 
+        c.outcome === 'answered' || c.outcome === 'booked' || c.outcome === 'booking_link_sent'
+      ).length || 0;
       
-      // Estimate revenue: $150 avg per booking (configurable per industry)
+      // Booking link sent = potential lead (SMS sent with booking link)
+      const bookingLinksSent = calls?.filter(c => c.outcome === 'booking_link_sent').length || 0;
+      
+      // Confirmed bookings = verified booking (future: webhook from calendar/CRM)
+      const confirmedBookings = calls?.filter(c => c.outcome === 'booked').length || 0;
+      
+      // Estimate revenue: $150 avg per CONFIRMED booking only
       const avgBookingValue = 150;
-      const estimatedRevenue = bookings * avgBookingValue;
+      const estimatedRevenue = confirmedBookings * avgBookingValue;
       const avgRevenuePerCall = totalCalls > 0 ? estimatedRevenue / totalCalls : 0;
       const answerRate = totalCalls > 0 ? (answeredCalls / totalCalls) * 100 : 0;
 
       setMetrics({
         totalCalls,
         answeredCalls,
-        bookings,
+        bookingLinksSent,
+        confirmedBookings,
         estimatedRevenue,
         avgRevenuePerCall,
         answerRate,
@@ -103,7 +114,7 @@ export default function ROIReport() {
       for (let i = 0; i < weeks; i++) {
         const weekStart = startOfWeek(subWeeks(new Date(), weeks - 1 - i));
         const weekKey = format(weekStart, 'MMM d');
-        weeklyMap.set(weekKey, { week: weekKey, calls: 0, bookings: 0, revenue: 0 });
+        weeklyMap.set(weekKey, { week: weekKey, calls: 0, bookingLinksSent: 0, confirmedBookings: 0, revenue: 0 });
       }
 
       calls?.forEach(call => {
@@ -112,8 +123,11 @@ export default function ROIReport() {
         const existing = weeklyMap.get(weekKey);
         if (existing) {
           existing.calls++;
+          if (call.outcome === 'booking_link_sent') {
+            existing.bookingLinksSent++;
+          }
           if (call.outcome === 'booked') {
-            existing.bookings++;
+            existing.confirmedBookings++;
             existing.revenue += avgBookingValue;
           }
         }
@@ -129,8 +143,8 @@ export default function ROIReport() {
   };
 
   const exportCSV = () => {
-    const headers = ['Week', 'Total Calls', 'Bookings', 'Estimated Revenue'];
-    const rows = weeklyData.map(w => [w.week, w.calls, w.bookings, `$${w.revenue}`]);
+    const headers = ['Week', 'Total Calls', 'Booking Links Sent', 'Confirmed Bookings', 'Estimated Revenue'];
+    const rows = weeklyData.map(w => [w.week, w.calls, w.bookingLinksSent, w.confirmedBookings, `$${w.revenue}`]);
     
     const summaryRows = [
       [],
@@ -138,7 +152,8 @@ export default function ROIReport() {
       ['Total Calls', metrics.totalCalls],
       ['Answered Calls', metrics.answeredCalls],
       ['Answer Rate', `${metrics.answerRate.toFixed(1)}%`],
-      ['Total Bookings', metrics.bookings],
+      ['Booking Links Sent', metrics.bookingLinksSent],
+      ['Confirmed Bookings', metrics.confirmedBookings],
       ['Estimated Revenue', `$${metrics.estimatedRevenue.toLocaleString()}`],
       ['Avg Revenue/Call', `$${metrics.avgRevenuePerCall.toFixed(2)}`],
     ];
@@ -191,8 +206,12 @@ export default function ROIReport() {
             <div class="metric-label">Total Calls</div>
           </div>
           <div class="metric">
-            <div class="metric-value">${metrics.bookings}</div>
-            <div class="metric-label">Bookings Made</div>
+            <div class="metric-value">${metrics.bookingLinksSent}</div>
+            <div class="metric-label">Booking Links Sent</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value">${metrics.confirmedBookings}</div>
+            <div class="metric-label">Confirmed Bookings</div>
           </div>
           <div class="metric">
             <div class="metric-value">$${metrics.estimatedRevenue.toLocaleString()}</div>
@@ -218,7 +237,8 @@ export default function ROIReport() {
             <tr>
               <th>Week</th>
               <th>Calls</th>
-              <th>Bookings</th>
+              <th>Links Sent</th>
+              <th>Confirmed</th>
               <th>Revenue</th>
             </tr>
           </thead>
@@ -227,7 +247,8 @@ export default function ROIReport() {
               <tr>
                 <td>${w.week}</td>
                 <td>${w.calls}</td>
-                <td>${w.bookings}</td>
+                <td>${w.bookingLinksSent}</td>
+                <td>${w.confirmedBookings}</td>
                 <td>$${w.revenue}</td>
               </tr>
             `).join('')}
@@ -260,7 +281,8 @@ export default function ROIReport() {
 
   const chartConfig = {
     calls: { label: 'Calls', color: 'hsl(var(--primary))' },
-    bookings: { label: 'Bookings', color: 'hsl(var(--accent))' },
+    bookingLinksSent: { label: 'Links Sent', color: 'hsl(var(--warning))' },
+    confirmedBookings: { label: 'Confirmed', color: 'hsl(var(--accent))' },
     revenue: { label: 'Revenue', color: 'hsl(142 76% 36%)' },
   };
 
@@ -314,13 +336,30 @@ export default function ROIReport() {
           <CardHeader className="pb-2">
             <CardDescription className="flex items-center gap-2">
               <Calendar className="h-4 w-4" />
-              Bookings Made
+              Booking Links Sent
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{metrics.bookings}</div>
+            <div className="text-3xl font-bold text-warning">{metrics.bookingLinksSent}</div>
             <p className="text-sm text-muted-foreground">
-              {metrics.totalCalls > 0 ? ((metrics.bookings / metrics.totalCalls) * 100).toFixed(1) : 0}% conversion
+              Potential leads
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription className="flex items-center gap-2">
+              <Calendar className="h-4 w-4" />
+              Confirmed Bookings
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-accent">{metrics.confirmedBookings}</div>
+            <p className="text-sm text-muted-foreground">
+              {metrics.bookingLinksSent > 0 
+                ? `${((metrics.confirmedBookings / metrics.bookingLinksSent) * 100).toFixed(1)}% conversion`
+                : '0% conversion'}
             </p>
           </CardContent>
         </Card>
@@ -363,7 +402,7 @@ export default function ROIReport() {
         <Card>
           <CardHeader>
             <CardTitle>Weekly Call Volume</CardTitle>
-            <CardDescription>Calls and bookings by week</CardDescription>
+            <CardDescription>Calls, booking links, and confirmed bookings</CardDescription>
           </CardHeader>
           <CardContent>
             <ChartContainer config={chartConfig} className="h-[300px]">
@@ -374,7 +413,8 @@ export default function ROIReport() {
                 <ChartTooltip content={<ChartTooltipContent />} />
                 <Legend />
                 <Bar dataKey="calls" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="bookings" fill="hsl(var(--accent))" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="bookingLinksSent" fill="hsl(var(--warning))" radius={[4, 4, 0, 0]} name="Links Sent" />
+                <Bar dataKey="confirmedBookings" fill="hsl(var(--accent))" radius={[4, 4, 0, 0]} name="Confirmed" />
               </BarChart>
             </ChartContainer>
           </CardContent>
