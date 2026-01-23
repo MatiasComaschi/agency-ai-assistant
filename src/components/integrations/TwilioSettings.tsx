@@ -187,7 +187,7 @@ export default function TwilioSettings({ company, onUpdate }: TwilioSettingsProp
 
   const generateWebhookUrl = () => {
     const baseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://your-project.supabase.co';
-    return `${baseUrl}/functions/v1/twilio-webhook?company_id=${company.id}`;
+    return `${baseUrl}/functions/v1/twilio-voice-inbound`;
   };
 
   const copyWebhookUrl = () => {
