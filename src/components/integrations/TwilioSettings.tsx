@@ -35,6 +35,9 @@ interface WebhookTestResult {
   status: 'matched_company' | 'no_match' | 'error' | 'pending';
   message: string;
   twimlResponse?: string;
+  testCallSid?: string;
+  extractedCallId?: string;
+  actionUrls?: string[];
   timestamp: string;
 }
 
@@ -322,6 +325,9 @@ export default function TwilioSettings({ company, onUpdate }: TwilioSettingsProp
         status: 'matched_company' | 'no_match' | 'error';
         httpStatus?: number;
         twimlText?: string;
+        testCallSid?: string;
+        extractedCallId?: string;
+        actionUrls?: string[];
         error?: string;
         timestamp: string;
       };
@@ -335,6 +341,9 @@ export default function TwilioSettings({ company, onUpdate }: TwilioSettingsProp
             ? 'Webhook responded but company not matched. Check that your Twilio number is saved correctly.'
             : result.error || 'Webhook test failed',
         twimlResponse: result.twimlText,
+        testCallSid: result.testCallSid,
+        extractedCallId: result.extractedCallId,
+        actionUrls: result.actionUrls,
         timestamp: result.timestamp,
       });
 
@@ -623,6 +632,41 @@ export default function TwilioSettings({ company, onUpdate }: TwilioSettingsProp
                     </p>
                   </div>
                 </div>
+
+                {/* Show CallSid and extracted call_id */}
+                {(testResult.testCallSid || testResult.extractedCallId) && (
+                  <div className="mt-3 p-3 rounded bg-muted/50 space-y-2">
+                    {testResult.testCallSid && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-medium text-muted-foreground">Test CallSid:</span>
+                        <code className="text-xs font-mono bg-background px-2 py-0.5 rounded">
+                          {testResult.testCallSid}
+                        </code>
+                      </div>
+                    )}
+                    {testResult.extractedCallId && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-medium text-muted-foreground">Extracted call_id:</span>
+                        <code className="text-xs font-mono bg-background px-2 py-0.5 rounded">
+                          {testResult.extractedCallId}
+                        </code>
+                        {testResult.extractedCallId === 'MISSING_CALLSID' && (
+                          <Badge variant="destructive" className="text-xs">Missing</Badge>
+                        )}
+                      </div>
+                    )}
+                    {testResult.actionUrls && testResult.actionUrls.length > 0 && (
+                      <div className="space-y-1">
+                        <span className="text-xs font-medium text-muted-foreground">Action URLs:</span>
+                        {testResult.actionUrls.map((url, idx) => (
+                          <code key={idx} className="block text-xs font-mono bg-background px-2 py-1 rounded break-all">
+                            {url}
+                          </code>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {testResult.twimlResponse && (
                   <Collapsible open={showTwimlResponse} onOpenChange={setShowTwimlResponse}>

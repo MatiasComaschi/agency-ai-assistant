@@ -381,12 +381,21 @@ Deno.serve(async (req) => {
     const callerResult = normalizeToE164(rawParams.From || rawParams.Caller || "");
     const calledNumber = calledResult.normalized;
     const callerNumber = callerResult.normalized;
-    const callSid = sanitizeString(rawParams.CallSid || "", 50);
+    
+    // Extract and validate CallSid - this is critical for Dial action URLs
+    const rawCallSid = rawParams.CallSid || "";
+    const twilioCallSid = rawCallSid ? sanitizeString(rawCallSid, 50) : "MISSING_CALLSID";
+    
+    console.log("[twilio-voice-inbound] Extracted CallSid:", { 
+      rawCallSid,
+      twilioCallSid,
+      hasMissingCallSid: twilioCallSid === "MISSING_CALLSID",
+    });
 
     console.log("[twilio-voice-inbound] Normalized numbers:", { 
       calledNumber, 
       callerNumber, 
-      callSid,
+      twilioCallSid,
       calledValid: calledResult.valid,
       callerValid: callerResult.valid,
       rawCalled: rawParams.Called || rawParams.To,
@@ -405,7 +414,7 @@ Deno.serve(async (req) => {
         reason: "invalid_called_number",
         called_number: rawParams.Called || rawParams.To || "missing",
         caller_number: callerNumber,
-        call_sid: callSid,
+        call_sid: twilioCallSid,
       });
       
       const errorTwiml = say("We're sorry, but we cannot process your call at this time. Please try again later.");
@@ -446,7 +455,7 @@ Deno.serve(async (req) => {
         reason: "company_not_found",
         called_number: calledNumber,
         caller_number: callerNumber,
-        call_sid: callSid,
+        call_sid: twilioCallSid,
         error: companyError?.message || "No company found",
       });
 
@@ -481,11 +490,12 @@ Deno.serve(async (req) => {
     });
 
     // Log matched company to audits
-    await logAudit(supabase, company.id, "inbound_call", "twilio_webhook", callSid, {
+    await logAudit(supabase, company.id, "inbound_call", "twilio_webhook", twilioCallSid, {
       status: "matched_company",
       called_number: calledNumber,
       caller_number: callerNumber,
       company_name: company.name,
+      twilio_call_sid: twilioCallSid,
       debug_mode: debugMode,
       ...(debugMode ? { raw_payload: rawParams } : {}),
     });
@@ -497,7 +507,7 @@ Deno.serve(async (req) => {
       const baseUrl = supabaseUrl.replace("/rest/v1", "");
       const functionsBase = `${baseUrl}/functions/v1`;
 
-      // Create call log
+      // Create call log - use twilioCallSid as the primary identifier for action URLs
       const { data: callLog } = await supabase
         .from("calls")
         .insert({
@@ -505,35 +515,49 @@ Deno.serve(async (req) => {
           caller_number: callerNumber,
           started_at: new Date().toISOString(),
           outcome: "ai_disabled",
-          extracted_json: { call_sid: callSid, ai_disabled: true },
+          extracted_json: { call_sid: twilioCallSid, ai_disabled: true },
         })
         .select()
         .single();
 
       await recordMetric(supabase, company.id, "twilio-voice-inbound", true, Date.now() - startTime);
 
+      // Use callLog.id if available, otherwise use twilioCallSid as fallback
+      const callIdParam = encodeURIComponent(callLog?.id || twilioCallSid);
+      const companyIdParam = encodeURIComponent(company.id);
+
       if (company.fallback_phone) {
+        const dialAction = `${functionsBase}/twilio-voice-dial-complete?call_id=${callIdParam}&company_id=${companyIdParam}`;
+        console.log("[twilio-voice-inbound] Dial action URL:", dialAction);
+        
         const twiml = say("Please hold while we connect you with a team member.") +
           dial(company.fallback_phone, {
             record: recordCalls,
-            action: `${functionsBase}/twilio-voice-dial-complete?call_id=${callLog?.id || ""}&company_id=${company.id}`,
+            action: dialAction,
           });
         
         if (debugMode) {
-          await logAudit(supabase, company.id, "twiml_response", "twilio_webhook", callSid, {
+          await logAudit(supabase, company.id, "twiml_response", "twilio_webhook", twilioCallSid, {
             outcome: "ai_disabled_forward",
+            dial_action_url: dialAction,
+            call_id_param: callIdParam,
             twiml_response: twiml,
           });
         }
         
         return twimlResponse(twiml);
       } else {
+        const voicemailAction = `${functionsBase}/twilio-voice-voicemail?call_id=${callIdParam}&company_id=${companyIdParam}`;
+        console.log("[twilio-voice-inbound] Voicemail action URL:", voicemailAction);
+        
         const twiml = say("We are currently unavailable. Please leave a message after the tone.") +
-          record({ action: `${functionsBase}/twilio-voice-voicemail?call_id=${callLog?.id || ""}&company_id=${company.id}`, maxLength: 120, transcribe: true });
+          record({ action: voicemailAction, maxLength: 120, transcribe: true });
         
         if (debugMode) {
-          await logAudit(supabase, company.id, "twiml_response", "twilio_webhook", callSid, {
+          await logAudit(supabase, company.id, "twiml_response", "twilio_webhook", twilioCallSid, {
             outcome: "ai_disabled_voicemail",
+            voicemail_action_url: voicemailAction,
+            call_id_param: callIdParam,
             twiml_response: twiml,
           });
         }
@@ -584,7 +608,7 @@ Deno.serve(async (req) => {
         started_at: new Date().toISOString(),
         outcome: "in_progress",
         extracted_json: {
-          call_sid: callSid,
+          call_sid: twilioCallSid,
           twilio_number: calledNumber,
           subscription_status: subscriptionStatus.isActive ? "active" : "inactive",
         },
@@ -606,10 +630,20 @@ Deno.serve(async (req) => {
     // Check if disclosure is required
     const disclosureRequired = aiProfile?.disclosure_required !== false;
 
-    // Build webhook URLs
+    // Build webhook URLs with properly encoded parameters
     const baseUrl = supabaseUrl.replace("/rest/v1", "");
     const functionsBase = `${baseUrl}/functions/v1`;
-    const callLogId = callLog?.id || "";
+    
+    // Use callLog.id if available, otherwise use twilioCallSid as fallback identifier
+    const callIdForUrls = encodeURIComponent(callLog?.id || twilioCallSid);
+    const companyIdForUrls = encodeURIComponent(company.id);
+    
+    console.log("[twilio-voice-inbound] Action URL parameters:", {
+      callIdForUrls,
+      companyIdForUrls,
+      usingCallLogId: !!callLog?.id,
+      usingTwilioCallSid: !callLog?.id,
+    });
 
     // Handle inactive subscription - fallback to voicemail or forward
     if (!subscriptionStatus.isActive) {
@@ -621,10 +655,11 @@ Deno.serve(async (req) => {
       
       let twiml: string;
       if (company.fallback_phone) {
+        const dialAction = `${functionsBase}/twilio-voice-dial-complete?call_id=${callIdForUrls}&company_id=${companyIdForUrls}`;
         twiml = say(inactiveMessage + "Please hold while we connect you with a team member.") +
-          dial(company.fallback_phone, { record: recordCalls, action: `${functionsBase}/twilio-voice-dial-complete?call_id=${callLogId}&company_id=${company.id}` });
+          dial(company.fallback_phone, { record: recordCalls, action: dialAction });
       } else {
-        const voicemailAction = `${functionsBase}/twilio-voice-voicemail?call_id=${callLogId}&company_id=${company.id}`;
+        const voicemailAction = `${functionsBase}/twilio-voice-voicemail?call_id=${callIdForUrls}&company_id=${companyIdForUrls}`;
         twiml = say(inactiveMessage + "Please leave your name, number, and a brief message after the tone.") +
           record({ action: voicemailAction, maxLength: 120, transcribe: config.transcribe_calls !== false }) +
           say("We did not receive your message. Goodbye.");
@@ -633,8 +668,9 @@ Deno.serve(async (req) => {
       await recordMetric(supabase, company.id, "twilio-voice-inbound", true, Date.now() - startTime);
       
       if (debugMode) {
-        await logAudit(supabase, company.id, "twiml_response", "twilio_webhook", callSid, {
+        await logAudit(supabase, company.id, "twiml_response", "twilio_webhook", twilioCallSid, {
           outcome: "subscription_inactive",
+          call_id_param: callIdForUrls,
           twiml_response: twiml,
         });
       }
@@ -667,9 +703,10 @@ Deno.serve(async (req) => {
       
       let twiml: string;
       if (afterHoursAction === "forward" && company.fallback_phone) {
-        twiml = say(afterHoursScript) + dial(company.fallback_phone, { record: recordCalls });
+        const dialAction = `${functionsBase}/twilio-voice-dial-complete?call_id=${callIdForUrls}&company_id=${companyIdForUrls}`;
+        twiml = say(afterHoursScript) + dial(company.fallback_phone, { record: recordCalls, action: dialAction });
       } else {
-        const voicemailAction = `${functionsBase}/twilio-voice-voicemail?call_id=${callLogId}&company_id=${company.id}`;
+        const voicemailAction = `${functionsBase}/twilio-voice-voicemail?call_id=${callIdForUrls}&company_id=${companyIdForUrls}`;
         twiml = say(afterHoursScript) +
           say("Please leave your message after the tone.") +
           record({ action: voicemailAction, maxLength: 120, transcribe: config.transcribe_calls !== false }) +
@@ -679,9 +716,10 @@ Deno.serve(async (req) => {
       await recordMetric(supabase, company.id, "twilio-voice-inbound", true, Date.now() - startTime);
       
       if (debugMode) {
-        await logAudit(supabase, company.id, "twiml_response", "twilio_webhook", callSid, {
+        await logAudit(supabase, company.id, "twiml_response", "twilio_webhook", twilioCallSid, {
           outcome: "after_hours",
           action: afterHoursAction,
+          call_id_param: callIdForUrls,
           twiml_response: twiml,
         });
       }
@@ -691,7 +729,7 @@ Deno.serve(async (req) => {
 
     // Business hours - AI receptionist flow
     console.log("[twilio-voice-inbound] Business hours - starting AI flow");
-    const conversationAction = `${functionsBase}/twilio-voice-conversation?call_id=${callLogId}&company_id=${company.id}`;
+    const conversationAction = `${functionsBase}/twilio-voice-conversation?call_id=${callIdForUrls}&company_id=${companyIdForUrls}`;
 
     // Build greeting with optional disclosure
     const greetingTwiml = disclosureRequired 
@@ -710,10 +748,12 @@ Deno.serve(async (req) => {
     await recordMetric(supabase, company.id, "twilio-voice-inbound", true, Date.now() - startTime);
 
     if (debugMode) {
-      await logAudit(supabase, company.id, "twiml_response", "twilio_webhook", callSid, {
+      await logAudit(supabase, company.id, "twiml_response", "twilio_webhook", twilioCallSid, {
         outcome: "ai_receptionist",
         greeting_script: greetingScript,
         disclosure_required: disclosureRequired,
+        call_id_param: callIdForUrls,
+        conversation_action: conversationAction,
         twiml_response: twiml,
       });
     }
