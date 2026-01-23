@@ -17,6 +17,10 @@ import {
   Headphones,
   History,
   Activity,
+  TrendingUp,
+  Gift,
+  MessageSquare,
+  Palette,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -37,6 +41,10 @@ const navItems = [
   { label: 'Integrations', icon: Puzzle, path: '/integrations' },
   { label: 'Billing', icon: CreditCard, path: '/billing' },
   { label: 'Monitoring', icon: Activity, path: '/monitoring' },
+  { label: 'ROI Report', icon: TrendingUp, path: '/roi-report' },
+  { label: 'Referrals', icon: Gift, path: '/referrals' },
+  { label: 'Testimonials', icon: MessageSquare, path: '/testimonials' },
+  { label: 'White Label', icon: Palette, path: '/white-label' },
   { label: 'Settings', icon: Settings, path: '/settings' },
 ];
 
