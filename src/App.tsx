@@ -17,6 +17,10 @@ import Integrations from "@/pages/Integrations";
 import Billing from "@/pages/Billing";
 import Settings from "@/pages/Settings";
 import NotFound from "@/pages/NotFound";
+import IndustryTemplates from "@/pages/IndustryTemplates";
+import BulkImport from "@/pages/BulkImport";
+import SupportConsole from "@/pages/SupportConsole";
+import AuditLog from "@/pages/AuditLog";
 
 const queryClient = new QueryClient();
 
@@ -30,9 +34,13 @@ const App = () => (
           <Routes>
             <Route path="/auth" element={<Auth />} />
             <Route path="/" element={<AppLayout />}>
-              <Route index element={<Navigate to="/agency" replace />} />
+            <Route index element={<Navigate to="/agency" replace />} />
               <Route path="agency" element={<AgencyDashboard />} />
               <Route path="agency/create-company" element={<CreateCompany />} />
+              <Route path="agency/templates" element={<IndustryTemplates />} />
+              <Route path="agency/bulk-import" element={<BulkImport />} />
+              <Route path="agency/support" element={<SupportConsole />} />
+              <Route path="agency/audit-log" element={<AuditLog />} />
               <Route path="company" element={<CompanyOverview />} />
               <Route path="ai-receptionist" element={<AIReceptionist />} />
               <Route path="knowledge-base" element={<KnowledgeBase />} />
