@@ -24,8 +24,31 @@ interface TwilioSettingsProps {
   onUpdate: () => void;
 }
 
-// Phone number validation regex for E.164 format
-const phoneRegex = /^\+[1-9]\d{1,14}$/;
+// Phone number validation and normalization to E.164 format
+const phoneRegex = /^\+[1-9]\d{6,14}$/;
+
+// Normalize phone number to E.164 format
+const normalizeToE164 = (phone: string): string => {
+  if (!phone) return "";
+  
+  // Remove all non-digit characters except leading +
+  let normalized = phone.replace(/[^\d+]/g, "");
+  
+  // Ensure it starts with +
+  if (!normalized.startsWith("+")) {
+    const digits = normalized.replace(/\D/g, "");
+    // Assume US number if 10 digits
+    if (digits.length === 10) {
+      normalized = `+1${digits}`;
+    } else if (digits.length === 11 && digits.startsWith("1")) {
+      normalized = `+${digits}`;
+    } else {
+      normalized = `+${digits}`;
+    }
+  }
+  
+  return normalized;
+};
 
 export default function TwilioSettings({ company, onUpdate }: TwilioSettingsProps) {
   const [twilioNumber, setTwilioNumber] = useState(company.twilio_number || '');
@@ -135,12 +158,16 @@ export default function TwilioSettings({ company, onUpdate }: TwilioSettingsProp
     setSaving(true);
 
     try {
-      // Update company with twilio_number and fallback_phone
+      // Normalize phone numbers to E.164 before saving
+      const normalizedTwilioNumber = twilioNumber ? normalizeToE164(twilioNumber) : null;
+      const normalizedFallbackPhone = fallbackPhone ? normalizeToE164(fallbackPhone) : null;
+
+      // Update company with normalized twilio_number and fallback_phone
       const { error: companyError } = await supabase
         .from('companies')
         .update({
-          twilio_number: twilioNumber || null,
-          fallback_phone: fallbackPhone || null,
+          twilio_number: normalizedTwilioNumber,
+          fallback_phone: normalizedFallbackPhone,
         })
         .eq('id', company.id);
 

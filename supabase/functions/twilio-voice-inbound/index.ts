@@ -87,15 +87,35 @@ async function recordMetric(
 }
 
 // Input validation
-function validatePhoneNumber(phone: string): { valid: boolean; sanitized: string } {
-  if (!phone) return { valid: false, sanitized: "" };
-  let sanitized = phone.replace(/[^\d+]/g, "");
-  if (!sanitized.startsWith("+")) {
-    const digits = sanitized.replace(/\D/g, "");
-    sanitized = digits.length === 10 ? `+1${digits}` : digits.length === 11 && digits.startsWith("1") ? `+${digits}` : `+${digits}`;
+// Phone number normalization to E.164 format
+function normalizeToE164(phone: string): { valid: boolean; normalized: string } {
+  if (!phone) return { valid: false, normalized: "" };
+  
+  // Remove all non-digit characters except leading +
+  let normalized = phone.replace(/[^\d+]/g, "");
+  
+  // Ensure it starts with +
+  if (!normalized.startsWith("+")) {
+    const digits = normalized.replace(/\D/g, "");
+    // Assume US number if 10 digits
+    if (digits.length === 10) {
+      normalized = `+1${digits}`;
+    } else if (digits.length === 11 && digits.startsWith("1")) {
+      normalized = `+${digits}`;
+    } else {
+      normalized = `+${digits}`;
+    }
   }
-  const valid = /^\+[1-9]\d{6,14}$/.test(sanitized);
-  return { valid, sanitized: valid ? sanitized : phone };
+  
+  // Validate E.164 format: + followed by 7-15 digits
+  const valid = /^\+[1-9]\d{6,14}$/.test(normalized);
+  return { valid, normalized: valid ? normalized : phone };
+}
+
+// Legacy wrapper for backward compatibility
+function validatePhoneNumber(phone: string): { valid: boolean; sanitized: string } {
+  const result = normalizeToE164(phone);
+  return { valid: result.valid, sanitized: result.normalized };
 }
 
 function sanitizeString(input: string, maxLength = 1000): string {
@@ -307,15 +327,23 @@ Deno.serve(async (req) => {
       params = await req.json();
     }
 
-    // Validate and sanitize input
-    const calledNumber = validatePhoneNumber(params.Called || params.To || "").sanitized;
-    const callerNumber = validatePhoneNumber(params.From || params.Caller || "").sanitized;
+    // Normalize phone numbers to E.164 BEFORE any database queries
+    const calledResult = normalizeToE164(params.Called || params.To || "");
+    const callerResult = normalizeToE164(params.From || params.Caller || "");
+    const calledNumber = calledResult.normalized;
+    const callerNumber = callerResult.normalized;
     const callSid = sanitizeString(params.CallSid || "", 50);
 
-    console.log("[twilio-voice-inbound] Incoming call:", { calledNumber, callerNumber, callSid });
+    console.log("[twilio-voice-inbound] Incoming call:", { 
+      calledNumber, 
+      callerNumber, 
+      callSid,
+      calledValid: calledResult.valid,
+      callerValid: callerResult.valid,
+    });
 
-    if (!calledNumber) {
-      console.error("[twilio-voice-inbound] Missing Called number");
+    if (!calledNumber || !calledResult.valid) {
+      console.error("[twilio-voice-inbound] Invalid or missing Called number:", params.Called);
       return twimlResponse(say("We're sorry, but we cannot process your call at this time. Please try again later."));
     }
 
@@ -326,7 +354,7 @@ Deno.serve(async (req) => {
       return twimlResponse(say("You have made too many calls. Please try again later."));
     }
 
-    // Identify company by twilio_number
+    // Identify company by twilio_number (using normalized E.164 format)
     const { data: company, error: companyError } = await supabase
       .from("companies")
       .select("id, name, twilio_number, fallback_phone, timezone, ai_enabled")
