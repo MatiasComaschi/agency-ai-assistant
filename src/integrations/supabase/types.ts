@@ -114,12 +114,14 @@ export type Database = {
           caller_number: string | null
           company_id: string
           cost_cents: number | null
+          duration_seconds: number | null
           ended_at: string | null
           extracted_json: Json | null
           id: string
           internal_notes: string | null
           outcome: string | null
           recording_url: string | null
+          sentiment: string | null
           started_at: string
           summary: string | null
           transcript: string | null
@@ -129,12 +131,14 @@ export type Database = {
           caller_number?: string | null
           company_id: string
           cost_cents?: number | null
+          duration_seconds?: number | null
           ended_at?: string | null
           extracted_json?: Json | null
           id?: string
           internal_notes?: string | null
           outcome?: string | null
           recording_url?: string | null
+          sentiment?: string | null
           started_at?: string
           summary?: string | null
           transcript?: string | null
@@ -144,12 +148,14 @@ export type Database = {
           caller_number?: string | null
           company_id?: string
           cost_cents?: number | null
+          duration_seconds?: number | null
           ended_at?: string | null
           extracted_json?: Json | null
           id?: string
           internal_notes?: string | null
           outcome?: string | null
           recording_url?: string | null
+          sentiment?: string | null
           started_at?: string
           summary?: string | null
           transcript?: string | null
@@ -323,6 +329,66 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      industry_templates: {
+        Row: {
+          after_hours_script: string | null
+          allowed_actions_json: Json | null
+          created_at: string
+          description: string | null
+          disclosure_script: string | null
+          escalation_rules_json: Json | null
+          greeting_script: string | null
+          id: string
+          industry: string
+          is_default: boolean | null
+          kb_items_json: Json | null
+          language: string | null
+          name: string
+          system_prompt: string
+          tone: string | null
+          updated_at: string
+          voice_id: string | null
+        }
+        Insert: {
+          after_hours_script?: string | null
+          allowed_actions_json?: Json | null
+          created_at?: string
+          description?: string | null
+          disclosure_script?: string | null
+          escalation_rules_json?: Json | null
+          greeting_script?: string | null
+          id?: string
+          industry: string
+          is_default?: boolean | null
+          kb_items_json?: Json | null
+          language?: string | null
+          name: string
+          system_prompt?: string
+          tone?: string | null
+          updated_at?: string
+          voice_id?: string | null
+        }
+        Update: {
+          after_hours_script?: string | null
+          allowed_actions_json?: Json | null
+          created_at?: string
+          description?: string | null
+          disclosure_script?: string | null
+          escalation_rules_json?: Json | null
+          greeting_script?: string | null
+          id?: string
+          industry?: string
+          is_default?: boolean | null
+          kb_items_json?: Json | null
+          language?: string | null
+          name?: string
+          system_prompt?: string
+          tone?: string | null
+          updated_at?: string
+          voice_id?: string | null
+        }
+        Relationships: []
       }
       integrations: {
         Row: {
