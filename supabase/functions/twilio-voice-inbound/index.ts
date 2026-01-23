@@ -131,6 +131,143 @@ const isHoliday = (
   }
 };
 
+// Check if subscription is active
+interface SubscriptionStatus {
+  isActive: boolean;
+  plan: string | null;
+  callsLimit: number;
+  minutesLimit: number;
+  callsUsed: number;
+  minutesUsed: number;
+}
+
+interface SubscriptionRecord {
+  status: string;
+  plan: string;
+  calls_limit: number;
+  minutes_limit: number;
+  current_period_end: string | null;
+}
+
+interface UsageRecord {
+  id: string;
+  calls_count: number;
+  minutes_count: number;
+}
+
+const checkSubscriptionStatus = async (
+  supabase: any,
+  companyId: string
+): Promise<SubscriptionStatus> => {
+  try {
+    // Check subscription table
+    const { data } = await supabase
+      .from("subscriptions")
+      .select("status, plan, calls_limit, minutes_limit, current_period_end")
+      .eq("company_id", companyId)
+      .single();
+
+    const subscription = data as SubscriptionRecord | null;
+
+    if (!subscription || subscription.status !== "active") {
+      return {
+        isActive: false,
+        plan: null,
+        callsLimit: 0,
+        minutesLimit: 0,
+        callsUsed: 0,
+        minutesUsed: 0,
+      };
+    }
+
+    // Check if subscription period is current
+    const now = new Date();
+    const periodEnd = subscription.current_period_end ? new Date(subscription.current_period_end) : null;
+    
+    if (periodEnd && now > periodEnd) {
+      return {
+        isActive: false,
+        plan: subscription.plan,
+        callsLimit: subscription.calls_limit,
+        minutesLimit: subscription.minutes_limit,
+        callsUsed: 0,
+        minutesUsed: 0,
+      };
+    }
+
+    // Get current month's usage
+    const currentMonth = new Date().toISOString().slice(0, 7) + "-01";
+    const { data: usageData } = await supabase
+      .from("usage")
+      .select("id, calls_count, minutes_count")
+      .eq("company_id", companyId)
+      .eq("month", currentMonth)
+      .single();
+
+    const usage = usageData as UsageRecord | null;
+
+    return {
+      isActive: true,
+      plan: subscription.plan,
+      callsLimit: subscription.calls_limit,
+      minutesLimit: subscription.minutes_limit,
+      callsUsed: usage?.calls_count || 0,
+      minutesUsed: usage?.minutes_count || 0,
+    };
+  } catch (error) {
+    console.error("[twilio-voice-inbound] Error checking subscription:", error);
+    // Default to active to prevent blocking legitimate calls due to errors
+    return {
+      isActive: true,
+      plan: null,
+      callsLimit: 100,
+      minutesLimit: 200,
+      callsUsed: 0,
+      minutesUsed: 0,
+    };
+  }
+};
+
+// Increment usage counters
+const incrementUsage = async (
+  supabase: any,
+  companyId: string
+): Promise<void> => {
+  try {
+    const currentMonth = new Date().toISOString().slice(0, 7) + "-01";
+    
+    // Try to update existing usage record
+    const { data } = await supabase
+      .from("usage")
+      .select("id, calls_count")
+      .eq("company_id", companyId)
+      .eq("month", currentMonth)
+      .single();
+
+    const existing = data as UsageRecord | null;
+
+    if (existing) {
+      await supabase
+        .from("usage")
+        .update({ calls_count: existing.calls_count + 1 })
+        .eq("id", existing.id);
+    } else {
+      // Create new usage record for this month
+      await supabase
+        .from("usage")
+        .insert({
+          company_id: companyId,
+          month: currentMonth,
+          calls_count: 1,
+          minutes_count: 0,
+          overage_cents: 0,
+        });
+    }
+  } catch (error) {
+    console.error("[twilio-voice-inbound] Error incrementing usage:", error);
+  }
+};
+
 Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -180,6 +317,10 @@ Deno.serve(async (req) => {
 
     console.log("[twilio-voice-inbound] Found company:", company.name, company.id);
 
+    // Check subscription status
+    const subscriptionStatus = await checkSubscriptionStatus(supabase, company.id);
+    console.log("[twilio-voice-inbound] Subscription status:", subscriptionStatus);
+
     // Fetch AI profile for scripts
     const { data: aiProfile } = await supabase
       .from("ai_profiles")
@@ -221,6 +362,7 @@ Deno.serve(async (req) => {
         extracted_json: {
           call_sid: callSid,
           twilio_number: calledNumber,
+          subscription_status: subscriptionStatus.isActive ? "active" : "inactive",
         },
       })
       .select()
@@ -232,7 +374,58 @@ Deno.serve(async (req) => {
       console.log("[twilio-voice-inbound] Created call log:", callLog.id);
     }
 
-    // Determine call routing
+    // Get scripts from AI profile
+    const greetingScript = aiProfile?.greeting_script || "Hello! Thank you for calling. How may I help you today?";
+    const disclosureScript = aiProfile?.disclosure_script || "Please note that you are speaking with an AI assistant.";
+    const afterHoursScript = aiProfile?.after_hours_script || "We are currently closed. Please leave a message after the tone and we will get back to you as soon as possible.";
+
+    // Build webhook URLs
+    const baseUrl = supabaseUrl.replace("/rest/v1", "");
+    const functionsBase = `${baseUrl}/functions/v1`;
+    const callLogId = callLog?.id || "";
+
+    // Handle inactive subscription - fallback to voicemail or forward
+    if (!subscriptionStatus.isActive) {
+      console.log("[twilio-voice-inbound] Subscription inactive - using fallback");
+
+      // Update call log with outcome
+      if (callLog) {
+        await supabase
+          .from("calls")
+          .update({ outcome: "subscription_inactive" })
+          .eq("id", callLog.id);
+      }
+
+      const inactiveMessage = "Thank you for calling. We're currently unable to connect you with our AI assistant. ";
+      
+      if (company.fallback_phone) {
+        // Forward to fallback phone
+        return twimlResponse(
+          say(inactiveMessage + "Please hold while we connect you with a team member.") +
+          dial(company.fallback_phone, { 
+            record: recordCalls,
+            action: `${functionsBase}/twilio-voice-dial-complete?call_id=${callLogId}&company_id=${company.id}`,
+          })
+        );
+      } else {
+        // Take voicemail
+        const voicemailAction = `${functionsBase}/twilio-voice-voicemail?call_id=${callLogId}&company_id=${company.id}`;
+        return twimlResponse(
+          say(inactiveMessage + "Please leave your name, number, and a brief message after the tone.") +
+          record({
+            action: voicemailAction,
+            maxLength: 120,
+            transcribe: config.transcribe_calls !== false,
+          }) +
+          say("We did not receive your message. Goodbye.")
+        );
+      }
+    }
+
+    // Increment usage counter for active subscription
+    await incrementUsage(supabase, company.id);
+
+    // Determine call routing for active subscriptions
     const isHolidayToday = holidays ? isHoliday(holidays, company.timezone) : false;
     const isBusinessHours = hours && hours.length > 0
       ? isWithinBusinessHours(hours, company.timezone)
@@ -245,16 +438,6 @@ Deno.serve(async (req) => {
       isOpen,
       afterHoursAction,
     });
-
-    // Get scripts from AI profile
-    const greetingScript = aiProfile?.greeting_script || "Hello! Thank you for calling. How may I help you today?";
-    const disclosureScript = aiProfile?.disclosure_script || "Please note that you are speaking with an AI assistant.";
-    const afterHoursScript = aiProfile?.after_hours_script || "We are currently closed. Please leave a message after the tone and we will get back to you as soon as possible.";
-
-    // Build webhook URLs
-    const baseUrl = supabaseUrl.replace("/rest/v1", "");
-    const functionsBase = `${baseUrl}/functions/v1`;
-    const callLogId = callLog?.id || "";
 
     // Route based on business hours
     if (!isOpen) {
@@ -296,7 +479,6 @@ Deno.serve(async (req) => {
 
     // Build conversation action URL
     const conversationAction = `${functionsBase}/twilio-voice-conversation?call_id=${callLogId}&company_id=${company.id}`;
-    const escalateAction = `${functionsBase}/twilio-voice-escalate?call_id=${callLogId}&company_id=${company.id}`;
 
     // Start with greeting + disclosure, then gather speech
     return twimlResponse(
