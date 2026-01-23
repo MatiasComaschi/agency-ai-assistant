@@ -1,17 +1,19 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.2";
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+};
+
 // TwiML helper functions
 const twimlResponse = (body: string): Response => {
   return new Response(
     `<?xml version="1.0" encoding="UTF-8"?><Response>${body}</Response>`,
     {
-      headers: { "Content-Type": "application/xml" },
+      headers: { ...corsHeaders, "Content-Type": "application/xml" },
     }
   );
-};
-
-const say = (text: string, voice = "Polly.Joanna"): string => {
-  return `<Say voice="${voice}">${escapeXml(text)}</Say>`;
 };
 
 const escapeXml = (text: string): string => {
@@ -23,17 +25,52 @@ const escapeXml = (text: string): string => {
     .replace(/'/g, "&apos;");
 };
 
+// Audit logging helper
+// deno-lint-ignore no-explicit-any
+async function logAudit(
+  supabase: any,
+  companyId: string | null,
+  action: string,
+  entityType: string,
+  entityId: string | null,
+  metadata: Record<string, unknown>
+): Promise<void> {
+  try {
+    const systemUserId = "00000000-0000-0000-0000-000000000000";
+    await supabase.from("audits").insert({
+      actor_user_id: systemUserId,
+      company_id: companyId || "00000000-0000-0000-0000-000000000000",
+      action,
+      entity_type: entityType,
+      entity_id: entityId,
+      metadata,
+    });
+  } catch (err) {
+    console.error("[twilio-voice-dial-complete] Audit log error:", err);
+  }
+}
+
 Deno.serve(async (req) => {
+  // Handle CORS preflight
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-  try {
-    // Parse URL params
-    const url = new URL(req.url);
-    const callId = url.searchParams.get("call_id");
-    const companyId = url.searchParams.get("company_id");
+  // Parse URL params early to get call_id and company_id
+  const url = new URL(req.url);
+  const callId = url.searchParams.get("call_id") || "";
+  const companyId = url.searchParams.get("company_id") || "";
+  
+  console.log("[twilio-voice-dial-complete] ====== DIAL COMPLETE ======");
+  console.log("[twilio-voice-dial-complete] call_id:", callId);
+  console.log("[twilio-voice-dial-complete] company_id:", companyId);
+  console.log("[twilio-voice-dial-complete] call_id is missing:", callId === "MISSING_CALLSID" || !callId);
 
+  try {
     // Parse form data from Twilio (dial status callback)
     const contentType = req.headers.get("content-type") || "";
     let params: Record<string, string> = {};
@@ -45,22 +82,49 @@ Deno.serve(async (req) => {
       }
     } else if (contentType.includes("application/json")) {
       params = await req.json();
+    } else {
+      // Try to parse as form data anyway
+      try {
+        const text = await req.text();
+        const urlParams = new URLSearchParams(text);
+        for (const [key, value] of urlParams.entries()) {
+          params[key] = value;
+        }
+      } catch {
+        console.warn("[twilio-voice-dial-complete] Could not parse request body");
+      }
     }
 
-    console.log("[twilio-voice-dial-complete] Dial status callback:", {
-      callId,
-      companyId,
+    console.log("[twilio-voice-dial-complete] Dial status callback params:", {
       dialCallStatus: params.DialCallStatus,
       dialCallDuration: params.DialCallDuration,
       recordingUrl: params.RecordingUrl,
+      callSid: params.CallSid,
     });
 
     // Extract dial status info
-    const dialStatus = params.DialCallStatus; // completed, busy, no-answer, failed, canceled
+    const dialStatus = params.DialCallStatus || "unknown"; // completed, busy, no-answer, failed, canceled
     const dialDuration = parseInt(params.DialCallDuration || "0", 10);
     const recordingUrl = params.RecordingUrl;
+    const twilioCallSid = params.CallSid || "";
 
-    if (callId) {
+    // Always log to audits, even if call_id is missing
+    await logAudit(supabase, companyId || null, "dial_complete", "twilio_webhook", callId || twilioCallSid, {
+      call_id: callId,
+      company_id: companyId,
+      dial_status: dialStatus,
+      dial_duration: dialDuration,
+      recording_url: recordingUrl,
+      twilio_call_sid: twilioCallSid,
+      call_id_missing: callId === "MISSING_CALLSID" || !callId,
+    });
+
+    // Determine if callId is a valid database UUID or a Twilio CallSid
+    const isValidUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(callId);
+    
+    if (callId && isValidUuid) {
+      console.log("[twilio-voice-dial-complete] Valid call log ID - updating database");
+      
       // Fetch existing call data
       const { data: existingCall } = await supabase
         .from("calls")
@@ -88,10 +152,10 @@ Deno.serve(async (req) => {
       }
 
       // Update call log with final status
-      await supabase
+      const { error: updateError } = await supabase
         .from("calls")
         .update({
-          recording_url: recordingUrl || existingCall?.extracted_json ? (existingJson.recording_url as string) : null,
+          recording_url: recordingUrl || (existingJson.recording_url as string) || null,
           outcome,
           ended_at: new Date().toISOString(),
           cost_cents: existingCost + callCostCents,
@@ -104,7 +168,11 @@ Deno.serve(async (req) => {
         })
         .eq("id", callId);
 
-      console.log("[twilio-voice-dial-complete] Updated call log:", callId, "outcome:", outcome);
+      if (updateError) {
+        console.error("[twilio-voice-dial-complete] Error updating call log:", updateError);
+      } else {
+        console.log("[twilio-voice-dial-complete] Updated call log:", callId, "outcome:", outcome);
+      }
 
       // Create follow-up task if call was not completed
       if (companyId && dialStatus !== "completed") {
@@ -118,12 +186,47 @@ Deno.serve(async (req) => {
 
         console.log("[twilio-voice-dial-complete] Created follow-up task for missed escalation");
       }
+    } else if (callId === "MISSING_CALLSID" || !callId) {
+      console.warn("[twilio-voice-dial-complete] call_id is MISSING_CALLSID or empty - cannot update call log");
+      console.warn("[twilio-voice-dial-complete] This indicates the inbound webhook did not receive a CallSid from Twilio");
+    } else {
+      // callId is a Twilio CallSid (starts with CA), try to find the call by extracted_json
+      console.log("[twilio-voice-dial-complete] call_id appears to be a Twilio CallSid, searching by extracted_json");
+      
+      const { data: callByCallSid } = await supabase
+        .from("calls")
+        .select("id")
+        .eq("extracted_json->>call_sid", callId)
+        .single();
+      
+      if (callByCallSid) {
+        console.log("[twilio-voice-dial-complete] Found call by CallSid:", callByCallSid.id);
+        // Update that call record
+        await supabase.from("calls").update({
+          outcome: dialStatus === "completed" ? "escalated_completed" : `escalated_${dialStatus}`,
+          ended_at: new Date().toISOString(),
+        }).eq("id", callByCallSid.id);
+      } else {
+        console.warn("[twilio-voice-dial-complete] Could not find call by CallSid:", callId);
+      }
     }
 
-    // Return empty TwiML (call is ending)
+    // Always return HTTP 200 quickly with valid TwiML
+    console.log("[twilio-voice-dial-complete] ====== COMPLETE ======");
     return twimlResponse(`<Hangup />`);
+    
   } catch (error) {
-    console.error("[twilio-voice-dial-complete] Unexpected error:", error);
+    console.error("[twilio-voice-dial-complete] ====== UNEXPECTED ERROR ======");
+    console.error("[twilio-voice-dial-complete] Error:", error);
+    
+    // Log error to audits
+    await logAudit(supabase, companyId || null, "dial_complete_error", "twilio_webhook", callId, {
+      call_id: callId,
+      company_id: companyId,
+      error_message: error instanceof Error ? error.message : String(error),
+    });
+    
+    // Always return HTTP 200 with valid TwiML (Twilio expects this)
     return twimlResponse(`<Hangup />`);
   }
 });

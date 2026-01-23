@@ -25,7 +25,7 @@ Deno.serve(async (req) => {
         JSON.stringify({ 
           ok: false, 
           error: "Missing companyId or twilioNumber",
-          status: 400,
+          status: "error",
         }),
         { 
           status: 400, 
@@ -37,9 +37,12 @@ Deno.serve(async (req) => {
     console.log("[twilio-webhook-test] Testing webhook for company:", companyId);
     console.log("[twilio-webhook-test] Twilio number:", twilioNumber);
 
-    // Build a realistic Twilio payload
+    // Generate a realistic test CallSid
+    const testCallSid = `CA_TEST_${Date.now().toString(16).toUpperCase()}`;
+    
+    // Build a realistic Twilio payload with proper CallSid
     const mockPayload = new URLSearchParams({
-      CallSid: `CA_TEST_${Date.now().toString(16)}`,
+      CallSid: testCallSid,
       AccountSid: "ACtest123456789",
       From: "+16150001111",
       To: twilioNumber,
@@ -55,6 +58,7 @@ Deno.serve(async (req) => {
     const inboundUrl = `${supabaseUrl}/functions/v1/twilio-voice-inbound`;
     
     console.log("[twilio-webhook-test] Calling:", inboundUrl);
+    console.log("[twilio-webhook-test] Test CallSid:", testCallSid);
     
     const response = await fetch(inboundUrl, {
       method: "POST",
@@ -66,10 +70,10 @@ Deno.serve(async (req) => {
     });
 
     const twimlText = await response.text();
-    const status = response.status;
+    const httpStatus = response.status;
 
-    console.log("[twilio-webhook-test] Response status:", status);
-    console.log("[twilio-webhook-test] TwiML response:", twimlText.substring(0, 200));
+    console.log("[twilio-webhook-test] Response status:", httpStatus);
+    console.log("[twilio-webhook-test] TwiML response length:", twimlText.length);
 
     // Determine if it was successful
     const isValidTwiml = twimlText.includes("<Response>");
@@ -84,12 +88,29 @@ Deno.serve(async (req) => {
       resultStatus = "no_match";
     }
 
+    // Extract action URLs from the TwiML for display
+    const actionUrlMatches = twimlText.match(/action="([^"]+)"/g) || [];
+    const actionUrls = actionUrlMatches.map(m => m.replace('action="', '').replace('"', ''));
+    
+    // Extract call_id from action URLs if present
+    let extractedCallId: string | null = null;
+    for (const url of actionUrls) {
+      const match = url.match(/call_id=([^&]+)/);
+      if (match) {
+        extractedCallId = decodeURIComponent(match[1]);
+        break;
+      }
+    }
+
     return new Response(
       JSON.stringify({
         ok: resultStatus === "matched_company",
         status: resultStatus,
-        httpStatus: status,
+        httpStatus,
         twimlText,
+        testCallSid,
+        extractedCallId,
+        actionUrls,
         error: resultStatus === "error" ? "Invalid response from webhook" : null,
         timestamp: new Date().toISOString(),
       }),
