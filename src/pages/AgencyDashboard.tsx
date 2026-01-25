@@ -13,8 +13,8 @@ import {
   Building2,
   Play,
   Loader2,
-  X,
 } from 'lucide-react';
+import { DebugIdsDialog } from '@/components/debug/DebugIdsDialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { Button } from '@/components/ui/button';
@@ -217,13 +217,16 @@ export default function AgencyDashboard() {
             Manage all your client companies in one place
           </p>
         </div>
-        <Button
-          onClick={() => navigate('/agency/create-company')}
-          className="bg-accent hover:bg-accent/90 gap-2"
-        >
-          <Plus className="h-4 w-4" />
-          Create Company
-        </Button>
+        <div className="flex gap-2">
+          <DebugIdsDialog />
+          <Button
+            onClick={() => navigate('/agency/create-company')}
+            className="bg-accent hover:bg-accent/90 gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            Create Company
+          </Button>
+        </div>
       </div>
 
       {/* Stats Cards */}
