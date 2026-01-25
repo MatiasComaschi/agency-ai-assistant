@@ -38,6 +38,3 @@ verify_jwt = false
 
 [functions.bulk-import-invite]
 verify_jwt = false
-
-[functions.get-credentials]
-verify_jwt = false
