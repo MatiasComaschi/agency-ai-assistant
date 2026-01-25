@@ -213,6 +213,11 @@ function record(options: { action: string; maxLength?: number; transcribe?: bool
   return `<Record ${attrs.join(" ")} />`;
 }
 
+// WebSocket stream for voice gateway
+function connectStream(wsUrl: string): string {
+  return `<Connect><Stream url="${escapeXml(wsUrl)}" /></Connect>`;
+}
+
 // Check if current time is within business hours
 const isWithinBusinessHours = (
   hours: Array<{ day_of_week: number; open_time: string; close_time: string; is_closed: boolean }>,
@@ -683,7 +688,7 @@ Deno.serve(async (req) => {
     }
 
     // ==============================================================
-    // DEFAULT: ALWAYS ROUTE TO AI CONVERSATION DURING BUSINESS HOURS
+    // DEFAULT: ALWAYS ROUTE TO AI VIA WEBSOCKET STREAM
     // ==============================================================
     // This is the primary path. No fallback to Dial unless:
     // 1. After hours with forward action (handled above)
@@ -691,12 +696,13 @@ Deno.serve(async (req) => {
     // 3. AI disabled / panic switch (handled above)
     // ==============================================================
     
-    console.log("[twilio-voice-inbound] ====== STARTING AI CONVERSATION ======");
+    console.log("[twilio-voice-inbound] ====== STARTING AI VOICE GATEWAY STREAM ======");
     
-    // Build conversation action URL with proper encoding
-    const conversationAction = `${functionsBase}/twilio-voice-conversation?company_id=${companyIdForUrls}&call_id=${callIdForUrls}`;
+    // Voice gateway WebSocket URL with authentication token
+    const voiceGatewayToken = "vgw_9f3c2a7b1d4e6f8a0c2d4e6f8a1b3c5d";
+    const voiceGatewayUrl = `wss://assistant-production-ef06.up.railway.app/twilio?company_id=${companyIdForUrls}&token=${voiceGatewayToken}`;
 
-    // Build TwiML: Greeting → Disclosure → Gather for speech input
+    // Build TwiML: Greeting → Disclosure → Connect to WebSocket Stream
     let twimlBody = "";
     
     // Say greeting
@@ -707,36 +713,26 @@ Deno.serve(async (req) => {
       twimlBody += say(disclosureScript);
     }
     
-    // Gather speech input with "How can I help?" prompt
-    twimlBody += gather({
-      action: conversationAction,
-      input: "speech",
-      timeout: 5,
-      speechTimeout: "auto",
-      hints: "booking, appointment, schedule, quote, question, help, speak to someone, transfer, human, representative",
-      innerTwiml: say("How can I help you today?"),
-    });
-    
-    // Redirect if no speech captured (ensures we still enter conversation loop)
-    twimlBody += `<Redirect method="POST">${escapeXml(conversationAction)}</Redirect>`;
+    // Connect to WebSocket voice gateway for real-time AI conversation
+    twimlBody += connectStream(voiceGatewayUrl);
 
     await recordMetric(supabase, company.id, "twilio-voice-inbound", true, Date.now() - startTime);
 
     // Log routing decision
     await logAudit(supabase, company.id, "inbound_routing", "twilio_webhook", twilioCallSid, {
-      routing_decision: "ai_conversation",
-      routing_reason: isOpen ? "business_hours_ai_enabled" : "after_hours_ai_enabled",
+      routing_decision: "ai_voice_gateway",
+      routing_reason: isOpen ? "business_hours_stream" : "after_hours_stream",
       greeting_script: greetingScript,
       disclosure_required: disclosureRequired,
       subscription_active: subscriptionStatus.isActive,
       call_id_param: callIdForUrls,
-      conversation_action: conversationAction,
+      voice_gateway_url: voiceGatewayUrl,
       has_ai_profile: !!aiProfile,
       ...(debugMode ? { twiml_response: twimlBody } : {}),
     });
 
-    console.log("[twilio-voice-inbound] TwiML action URL:", conversationAction);
-    console.log("[twilio-voice-inbound] ====== CALL ROUTED TO AI ======");
+    console.log("[twilio-voice-inbound] Voice Gateway URL:", voiceGatewayUrl);
+    console.log("[twilio-voice-inbound] ====== CALL CONNECTED TO VOICE GATEWAY ======");
     
     return buildTwimlResponse(twimlBody);
     
