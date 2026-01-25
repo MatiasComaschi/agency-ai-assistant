@@ -633,11 +633,11 @@ Deno.serve(async (req) => {
     console.log("[twilio-voice-inbound] ====== STARTING 24/7 AI VOICE GATEWAY STREAM ======");
     console.log("[twilio-voice-inbound] is_after_hours:", isAfterHours);
     
-    // Voice gateway WebSocket URL with authentication token and after-hours context
-    const voiceGatewayToken = "VOICE_GATEWAY_TOKEN";
+    // Voice gateway WebSocket URL with authentication token
+    const voiceGatewayToken = "PUT_YOUR_REAL_TOKEN_HERE";
     const voiceGatewayUrl = `wss://assistant-production-ef06.up.railway.app/twilio?company_id=${companyIdForUrls}&token=${voiceGatewayToken}`;
 
-    // Build TwiML: Greeting → Disclosure → Connect to WebSocket Stream
+    // Build TwiML: Greeting → Disclosure → Connect to WebSocket Stream → Fallback Record
     let twimlBody = "";
     
     // Say greeting
@@ -650,6 +650,10 @@ Deno.serve(async (req) => {
     
     // Connect to WebSocket voice gateway for real-time AI conversation
     twimlBody += connectStream(voiceGatewayUrl);
+    
+    // Fallback if stream disconnects/fails - do NOT hang up, record voicemail instead
+    twimlBody += say("I'm having trouble connecting. Please leave a message after the beep.");
+    twimlBody += `<Record maxLength="120" playBeep="true" />`;
 
     await recordMetric(supabase, company.id, "twilio-voice-inbound", true, Date.now() - startTime);
 
