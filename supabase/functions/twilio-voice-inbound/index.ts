@@ -634,8 +634,8 @@ Deno.serve(async (req) => {
     console.log("[twilio-voice-inbound] is_after_hours:", isAfterHours);
     
     // Voice gateway WebSocket URL with authentication token and after-hours context
-    const voiceGatewayToken = "vgw_9f3c2a7b1d4e6f8a0c2d4e6f8a1b3c5d";
-    const voiceGatewayUrl = `wss://assistant-production-ef06.up.railway.app/twilio?company_id=${companyIdForUrls}&call_id=${callIdForUrls}&is_after_hours=${isAfterHours}&token=${voiceGatewayToken}`;
+    const voiceGatewayToken = "VOICE_GATEWAY_TOKEN";
+    const voiceGatewayUrl = `wss://assistant-production-ef06.up.railway.app/twilio?company_id=${companyIdForUrls}&token=${voiceGatewayToken}`;
 
     // Build TwiML: Greeting → Disclosure → Connect to WebSocket Stream
     let twimlBody = "";
