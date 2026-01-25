@@ -179,24 +179,6 @@ function say(text: string, voice = "Polly.Joanna"): string {
   return `<Say voice="${voice}">${escapeXml(text)}</Say>`;
 }
 
-function gather(options: {
-  action: string;
-  input?: string;
-  timeout?: number;
-  speechTimeout?: string;
-  hints?: string;
-  innerTwiml?: string;
-}): string {
-  const attrs = [
-    `action="${escapeXml(options.action)}"`,
-    `input="${options.input || "speech"}"`,
-    `timeout="${options.timeout || 3}"`,
-    `speechTimeout="${options.speechTimeout || "auto"}"`,
-  ];
-  if (options.hints) attrs.push(`hints="${escapeXml(options.hints)}"`);
-  return `<Gather ${attrs.join(" ")}>${options.innerTwiml || ""}</Gather>`;
-}
-
 function dial(number: string, options?: { record?: boolean; action?: string }): string {
   const attrs: string[] = [];
   if (options?.record) attrs.push('record="record-from-answer-dual"');
@@ -502,9 +484,8 @@ Deno.serve(async (req) => {
     const config = (integration?.config_json as Record<string, unknown>) || {};
     debugMode = config.debug_mode === true;
     const recordCalls = config.record_calls !== false;
-    const afterHoursAction = (config.after_hours_action as string) || "voicemail";
 
-    console.log("[twilio-voice-inbound] Config:", { debugMode, recordCalls, afterHoursAction });
+    console.log("[twilio-voice-inbound] Config:", { debugMode, recordCalls });
 
     // Log matched company to audits
     await logAudit(supabase, company.id, "inbound_call", "twilio_webhook", twilioCallSid, {
@@ -588,7 +569,14 @@ Deno.serve(async (req) => {
     const { data: hours } = await supabase.from("company_hours").select("*").eq("company_id", company.id);
     const { data: holidays } = await supabase.from("company_holidays").select("*").eq("company_id", company.id);
 
-    // Create call log entry
+    // Compute is_after_hours (but ALWAYS route to AI)
+    const isHolidayToday = holidays ? isHoliday(holidays, company.timezone) : false;
+    const isBusinessHours = hours && hours.length > 0 ? isWithinBusinessHours(hours, company.timezone) : true;
+    const isAfterHours = isHolidayToday || !isBusinessHours;
+
+    console.log("[twilio-voice-inbound] Time check:", { isHolidayToday, isBusinessHours, isAfterHours });
+
+    // Create call log entry with is_after_hours flag
     const { data: callLog, error: callLogError } = await supabase
       .from("calls")
       .insert({
@@ -600,6 +588,7 @@ Deno.serve(async (req) => {
           call_sid: twilioCallSid,
           twilio_number: calledNumber,
           subscription_status: subscriptionStatus.isActive ? "active" : "inactive",
+          is_after_hours: isAfterHours,
         },
       })
       .select()
@@ -618,7 +607,6 @@ Deno.serve(async (req) => {
     // Get scripts from AI profile
     const greetingScript = aiProfile?.greeting_script || "Hello! Thank you for calling. How may I help you today?";
     const disclosureScript = aiProfile?.disclosure_script || "Please note that you are speaking with an AI assistant.";
-    const afterHoursScript = aiProfile?.after_hours_script || "We are currently closed. Please leave a message after the tone and we will get back to you as soon as possible.";
     const disclosureRequired = aiProfile?.disclosure_required !== false;
 
     // Increment usage counter (only if subscription active, but don't block calls)
@@ -628,79 +616,26 @@ Deno.serve(async (req) => {
       console.log("[twilio-voice-inbound] Subscription inactive - allowing call but not incrementing usage");
     }
 
-    // Check business hours
-    const isHolidayToday = holidays ? isHoliday(holidays, company.timezone) : false;
-    const isBusinessHours = hours && hours.length > 0 ? isWithinBusinessHours(hours, company.timezone) : true;
-    const isOpen = !isHolidayToday && isBusinessHours;
-
-    console.log("[twilio-voice-inbound] Routing:", { isHolidayToday, isBusinessHours, isOpen, afterHoursAction });
-
-    // After hours handling - ONLY fall back when after hours AND action is forward
-    if (!isOpen && afterHoursAction === "forward" && company.fallback_phone) {
-      console.log("[twilio-voice-inbound] After hours with forward action - dialing fallback");
-      if (callLog) {
-        await supabase.from("calls").update({ outcome: "after_hours" }).eq("id", callLog.id);
-      }
-      
-      const dialAction = `${functionsBase}/twilio-voice-dial-complete?call_id=${callIdForUrls}&company_id=${companyIdForUrls}`;
-      const twiml = say(afterHoursScript) + dial(company.fallback_phone, { record: recordCalls, action: dialAction });
-      
-      await recordMetric(supabase, company.id, "twilio-voice-inbound", true, Date.now() - startTime);
-      
-      await logAudit(supabase, company.id, "inbound_routing", "twilio_webhook", twilioCallSid, {
-        routing_decision: "fallback_dial",
-        routing_reason: "after_hours_forward",
-        call_id_param: callIdForUrls,
-        ...(debugMode ? { twiml_response: twiml } : {}),
-      });
-      
-      return buildTwimlResponse(twiml);
-    }
-
-    // After hours with voicemail action - go to voicemail
-    if (!isOpen && afterHoursAction === "voicemail") {
-      console.log("[twilio-voice-inbound] After hours with voicemail action");
-      if (callLog) {
-        await supabase.from("calls").update({ outcome: "after_hours" }).eq("id", callLog.id);
-      }
-      
-      const voicemailAction = `${functionsBase}/twilio-voice-voicemail?call_id=${callIdForUrls}&company_id=${companyIdForUrls}`;
-      const twiml = say(afterHoursScript) +
-        say("Please leave your message after the tone.") +
-        record({ action: voicemailAction, maxLength: 120, transcribe: config.transcribe_calls !== false }) +
-        say("We did not receive your message. Goodbye.");
-      
-      await recordMetric(supabase, company.id, "twilio-voice-inbound", true, Date.now() - startTime);
-      
-      await logAudit(supabase, company.id, "inbound_routing", "twilio_webhook", twilioCallSid, {
-        routing_decision: "voicemail",
-        routing_reason: "after_hours_voicemail",
-        call_id_param: callIdForUrls,
-        ...(debugMode ? { twiml_response: twiml } : {}),
-      });
-      
-      return buildTwimlResponse(twiml);
-    }
-
     // No AI profile - provide helpful message but still try AI conversation
     if (!aiProfile) {
       console.log("[twilio-voice-inbound] No AI profile - using default scripts for AI conversation");
     }
 
     // ==============================================================
-    // DEFAULT: ALWAYS ROUTE TO AI VIA WEBSOCKET STREAM
+    // 24/7 AI: ALWAYS ROUTE TO AI VIA WEBSOCKET STREAM
     // ==============================================================
-    // This is the primary path. No fallback to Dial unless:
-    // 1. After hours with forward action (handled above)
-    // 2. After hours with voicemail action (handled above)
-    // 3. AI disabled / panic switch (handled above)
+    // The AI is available 24/7. No voicemail/forward fallback for after-hours.
+    // is_after_hours is passed to the voice gateway for context-aware responses.
+    // Only exceptions:
+    // 1. AI disabled / panic switch (handled above)
     // ==============================================================
     
-    console.log("[twilio-voice-inbound] ====== STARTING AI VOICE GATEWAY STREAM ======");
+    console.log("[twilio-voice-inbound] ====== STARTING 24/7 AI VOICE GATEWAY STREAM ======");
+    console.log("[twilio-voice-inbound] is_after_hours:", isAfterHours);
     
-    // Voice gateway WebSocket URL with authentication token
+    // Voice gateway WebSocket URL with authentication token and after-hours context
     const voiceGatewayToken = "vgw_9f3c2a7b1d4e6f8a0c2d4e6f8a1b3c5d";
-    const voiceGatewayUrl = `wss://assistant-production-ef06.up.railway.app/twilio?company_id=${companyIdForUrls}&token=${voiceGatewayToken}`;
+    const voiceGatewayUrl = `wss://assistant-production-ef06.up.railway.app/twilio?company_id=${companyIdForUrls}&call_id=${callIdForUrls}&is_after_hours=${isAfterHours}&token=${voiceGatewayToken}`;
 
     // Build TwiML: Greeting → Disclosure → Connect to WebSocket Stream
     let twimlBody = "";
@@ -718,10 +653,11 @@ Deno.serve(async (req) => {
 
     await recordMetric(supabase, company.id, "twilio-voice-inbound", true, Date.now() - startTime);
 
-    // Log routing decision
+    // Log routing decision with is_after_hours in metadata
     await logAudit(supabase, company.id, "inbound_routing", "twilio_webhook", twilioCallSid, {
-      routing_decision: "ai_voice_gateway",
-      routing_reason: isOpen ? "business_hours_stream" : "after_hours_stream",
+      routing_decision: "ai_voice_gateway_24_7",
+      routing_reason: isAfterHours ? "after_hours_ai" : "business_hours_ai",
+      is_after_hours: isAfterHours,
       greeting_script: greetingScript,
       disclosure_required: disclosureRequired,
       subscription_active: subscriptionStatus.isActive,
@@ -732,7 +668,7 @@ Deno.serve(async (req) => {
     });
 
     console.log("[twilio-voice-inbound] Voice Gateway URL:", voiceGatewayUrl);
-    console.log("[twilio-voice-inbound] ====== CALL CONNECTED TO VOICE GATEWAY ======");
+    console.log("[twilio-voice-inbound] ====== CALL CONNECTED TO 24/7 AI GATEWAY ======");
     
     return buildTwimlResponse(twimlBody);
     
