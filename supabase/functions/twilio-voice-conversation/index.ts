@@ -115,6 +115,25 @@ const COMPLAINT_KEYWORDS = [
   "attorney",
 ];
 
+// Emergency keywords for after-hours forwarding
+const EMERGENCY_KEYWORDS = [
+  "emergency",
+  "urgent",
+  "no heat",
+  "no hot water",
+  "gas leak",
+  "flood",
+  "flooding",
+  "water everywhere",
+  "fire",
+  "carbon monoxide",
+  "broken pipe",
+  "burst pipe",
+  "sewage",
+  "no power",
+  "electrical fire",
+];
+
 // Booking intent keywords
 const BOOKING_KEYWORDS = [
   "book",
@@ -170,7 +189,7 @@ const GOODBYE_PATTERNS = [
 ];
 
 // Intent detection
-type UserIntent = "greeting" | "small_talk" | "booking" | "question" | "escalation" | "goodbye" | "unknown";
+type UserIntent = "greeting" | "small_talk" | "booking" | "question" | "escalation" | "goodbye" | "callback_request" | "emergency" | "unknown";
 
 const detectIntent = (speech: string): UserIntent => {
   const lower = speech.toLowerCase();
@@ -178,6 +197,11 @@ const detectIntent = (speech: string): UserIntent => {
   // Check for goodbye first
   for (const pattern of GOODBYE_PATTERNS) {
     if (lower.includes(pattern)) return "goodbye";
+  }
+  
+  // Check for emergency
+  for (const keyword of EMERGENCY_KEYWORDS) {
+    if (lower.includes(keyword)) return "emergency";
   }
   
   // Check for escalation
@@ -205,7 +229,10 @@ const detectIntent = (speech: string): UserIntent => {
   return "question";
 };
 
-const generateGreetingResponse = (companyName: string): string => {
+const generateGreetingResponse = (companyName: string, isAfterHours: boolean): string => {
+  if (isAfterHours) {
+    return `Hi there! We're currently closed, but I can still help with questions and take a message. What can I do for you?`;
+  }
   const responses = [
     `Hi there! I'm doing great, thanks for asking. How can I help you today?`,
     `Hello! It's nice to hear from you. What can I do for you?`,
@@ -214,7 +241,10 @@ const generateGreetingResponse = (companyName: string): string => {
   return responses[Math.floor(Math.random() * responses.length)];
 };
 
-const generateSmallTalkResponse = (): string => {
+const generateSmallTalkResponse = (isAfterHours: boolean): string => {
+  if (isAfterHours) {
+    return `I appreciate that! We're currently closed, but I'm here to help. What do you need?`;
+  }
   const responses = [
     `I'm doing well, thank you! Now, what can I help you with?`,
     `Thanks for asking! I'm here and ready to help. What do you need?`,
@@ -308,6 +338,11 @@ const detectBookingIntent = (speechResult: string): boolean => {
   return BOOKING_KEYWORDS.some((keyword) => lowerSpeech.includes(keyword));
 };
 
+const detectEmergency = (speechResult: string): boolean => {
+  const lowerSpeech = speechResult.toLowerCase();
+  return EMERGENCY_KEYWORDS.some((keyword) => lowerSpeech.includes(keyword));
+};
+
 const getBookingTemplate = (industry: string | null): typeof INDUSTRY_BOOKING_TEMPLATES.default => {
   const normalizedIndustry = (industry || "").toLowerCase();
   return INDUSTRY_BOOKING_TEMPLATES[normalizedIndustry] || INDUSTRY_BOOKING_TEMPLATES.default;
@@ -323,10 +358,21 @@ interface BookingFlowState {
   industry?: string;
 }
 
+interface CallbackFlowState {
+  active: boolean;
+  step: number;
+  name?: string;
+  callback_number?: string;
+  reason?: string;
+  urgency?: string;
+}
+
 interface ExtractedJson {
   booking_flow?: BookingFlowState;
+  callback_flow?: CallbackFlowState;
   last_user_intent?: UserIntent;
   conversation_context?: string;
+  is_after_hours?: boolean;
   [key: string]: unknown;
 }
 
@@ -395,6 +441,7 @@ Deno.serve(async (req) => {
     const companyId = url.searchParams.get("company_id");
     const turnCount = parseInt(url.searchParams.get("turn") || "1", 10);
     const bookingStep = url.searchParams.get("booking_step");
+    const callbackStep = url.searchParams.get("callback_step");
 
     // Parse form data from Twilio
     const params = await parseTwilioParams(req);
@@ -410,6 +457,7 @@ Deno.serve(async (req) => {
       companyId,
       turnCount,
       bookingStep,
+      callbackStep,
       speechResult: speechResult.substring(0, 100),
       confidence,
       callSid,
@@ -446,6 +494,7 @@ Deno.serve(async (req) => {
       escalateOnRequest: true,
       escalateOnComplaint: true,
       escalateAfterMinutes: 5,
+      emergencyForwardAfterHours: false, // Disabled by default
     };
 
     const allowedActions = (aiProfile?.allowed_actions_json as Record<string, boolean>) || {
@@ -457,8 +506,10 @@ Deno.serve(async (req) => {
 
     // Get current state from call record
     let bookingFlowState: BookingFlowState = { active: false, step: 0 };
+    let callbackFlowState: CallbackFlowState = { active: false, step: 0 };
     let lastUserIntent: UserIntent = "unknown";
     let conversationContext = "";
+    let isAfterHours = false;
     
     if (callId) {
       const { data: callData } = await supabase
@@ -471,13 +522,21 @@ Deno.serve(async (req) => {
       if (extractedJson.booking_flow) {
         bookingFlowState = extractedJson.booking_flow;
       }
+      if (extractedJson.callback_flow) {
+        callbackFlowState = extractedJson.callback_flow;
+      }
       if (extractedJson.last_user_intent) {
         lastUserIntent = extractedJson.last_user_intent;
       }
       if (extractedJson.conversation_context) {
         conversationContext = extractedJson.conversation_context;
       }
+      if (extractedJson.is_after_hours !== undefined) {
+        isAfterHours = extractedJson.is_after_hours;
+      }
     }
+
+    console.log("[twilio-voice-conversation] Context:", { isAfterHours, lastUserIntent });
 
     // Detect current intent
     const currentIntent = speechResult ? detectIntent(speechResult) : "unknown";
@@ -491,11 +550,12 @@ Deno.serve(async (req) => {
         last_user_utterance: speechResult.substring(0, 500),
         last_ai_response: goodbyeMsg,
         intent: "goodbye",
+        is_after_hours: isAfterHours,
       });
 
       if (callId) {
         await supabase.from("calls").update({ 
-          outcome: bookingFlowState.active ? "booked" : "resolved",
+          outcome: bookingFlowState.active ? "booked" : (callbackFlowState.active ? "callback_requested" : "resolved"),
           ended_at: new Date().toISOString(),
         }).eq("id", callId);
       }
@@ -503,8 +563,328 @@ Deno.serve(async (req) => {
       return buildTwimlResponse(say(goodbyeMsg) + `<Hangup />`);
     }
 
-    // Check for escalation triggers
-    if (speechResult) {
+    // Handle emergency during after-hours (only if enabled)
+    if (isAfterHours && currentIntent === "emergency" && escalationRules.emergencyForwardAfterHours === true && company?.fallback_phone) {
+      console.log("[twilio-voice-conversation] Emergency detected after-hours - forwarding");
+      
+      await logAudit(supabase, companyId, "conversation_escalate", "twilio_conversation", callId, {
+        turn: turnCount,
+        escalation_reason: "emergency_after_hours",
+        last_user_utterance: speechResult.substring(0, 500),
+        is_after_hours: isAfterHours,
+      });
+
+      return buildTwimlResponse(
+        say("I understand this is urgent. Let me connect you with someone right away.") +
+        `<Redirect>${escapeXml(escalateUrl)}&amp;reason=emergency_after_hours</Redirect>`
+      );
+    }
+
+    // Handle escalation request during after-hours - offer callback instead
+    if (isAfterHours && currentIntent === "escalation") {
+      console.log("[twilio-voice-conversation] Escalation requested after-hours - offering callback");
+      
+      // Start callback flow
+      callbackFlowState = { active: true, step: 0 };
+      
+      if (callId) {
+        const { data: existingCall } = await supabase
+          .from("calls")
+          .select("extracted_json")
+          .eq("id", callId)
+          .single();
+
+        const existingJson = (existingCall?.extracted_json as Record<string, unknown>) || {};
+        await supabase.from("calls").update({
+          extracted_json: {
+            ...existingJson,
+            callback_flow: callbackFlowState,
+            last_user_intent: "callback_request",
+          },
+        }).eq("id", callId);
+      }
+
+      const callbackUrl = `${functionsBase}/twilio-voice-conversation?call_id=${encodeURIComponent(callId || callSid)}&company_id=${encodeURIComponent(companyId)}&turn=${turnCount + 1}&callback_step=1`;
+      
+      await logAudit(supabase, companyId, "conversation_turn", "twilio_conversation", callId, {
+        turn: turnCount,
+        last_user_utterance: speechResult.substring(0, 500),
+        last_ai_response: "Cannot transfer after hours - offering callback",
+        intent: "escalation",
+        is_after_hours: isAfterHours,
+      });
+
+      return buildTwimlResponse(
+        gather({
+          action: callbackUrl,
+          input: "speech",
+          timeout: 8,
+          speechTimeout: "auto",
+          innerTwiml: say("I can't connect you right now since we're closed, but I can create a callback request for the next business day. Can I get your name?"),
+        }) +
+        say("Sorry — I didn't quite hear that. Want to try again?") +
+        `<Redirect method="POST">${escapeXml(callbackUrl)}</Redirect>`
+      );
+    }
+
+    // Handle callback flow (for after-hours)
+    if (callbackStep || callbackFlowState.active) {
+      const currentStep = parseInt(callbackStep || "0", 10);
+      
+      // Store answer from previous step
+      if (speechResult && currentStep > 0) {
+        if (currentStep === 1) {
+          callbackFlowState.name = speechResult;
+        } else if (currentStep === 2) {
+          // Phone confirmation
+          const confirmed = speechResult.toLowerCase();
+          if (confirmed.includes("yes") || confirmed.includes("correct") || confirmed.includes("right") || confirmed.includes("yeah")) {
+            callbackFlowState.callback_number = callerNumber;
+          } else {
+            // Ask for correct number
+            callbackFlowState.step = currentStep;
+            
+            if (callId) {
+              const { data: existingCall } = await supabase
+                .from("calls")
+                .select("extracted_json")
+                .eq("id", callId)
+                .single();
+
+              const existingJson = (existingCall?.extracted_json as Record<string, unknown>) || {};
+              await supabase.from("calls").update({
+                extracted_json: {
+                  ...existingJson,
+                  callback_flow: callbackFlowState,
+                },
+              }).eq("id", callId);
+            }
+
+            const phoneUrl = `${functionsBase}/twilio-voice-conversation?call_id=${encodeURIComponent(callId || callSid)}&company_id=${encodeURIComponent(companyId)}&turn=${turnCount + 1}&callback_step=3`;
+            
+            return buildTwimlResponse(
+              gather({
+                action: phoneUrl,
+                input: "dtmf speech",
+                timeout: 10,
+                speechTimeout: "auto",
+                innerTwiml: say("No problem. What's the best number to reach you at?"),
+              }) +
+              say("Sorry — I didn't quite hear that. Want to try again?") +
+              `<Redirect method="POST">${escapeXml(phoneUrl)}</Redirect>`
+            );
+          }
+        } else if (currentStep === 3) {
+          // Alternative phone number
+          const digits = speechResult.replace(/\D/g, "");
+          if (digits.length >= 10) {
+            callbackFlowState.callback_number = digits.startsWith("1") ? `+${digits}` : `+1${digits}`;
+          } else {
+            callbackFlowState.callback_number = callerNumber;
+          }
+        } else if (currentStep === 4) {
+          callbackFlowState.reason = speechResult;
+        } else if (currentStep === 5) {
+          // Urgency level
+          const lower = speechResult.toLowerCase();
+          if (lower.includes("urgent") || lower.includes("asap") || lower.includes("emergency") || lower.includes("soon")) {
+            callbackFlowState.urgency = "high";
+          } else if (lower.includes("whenever") || lower.includes("no rush") || lower.includes("not urgent")) {
+            callbackFlowState.urgency = "low";
+          } else {
+            callbackFlowState.urgency = "normal";
+          }
+        }
+      }
+
+      callbackFlowState.step = currentStep;
+
+      // Save state
+      if (callId) {
+        const { data: existingCall } = await supabase
+          .from("calls")
+          .select("extracted_json, transcript")
+          .eq("id", callId)
+          .single();
+
+        const existingJson = (existingCall?.extracted_json as Record<string, unknown>) || {};
+        const existingTranscript = existingCall?.transcript || "";
+
+        await supabase.from("calls").update({
+          transcript: existingTranscript + `\nCaller: ${speechResult}`,
+          extracted_json: {
+            ...existingJson,
+            callback_flow: callbackFlowState,
+            last_user_intent: "callback_request",
+          },
+        }).eq("id", callId);
+      }
+
+      // Step 1: Ask for name (already asked in escalation handling)
+      if (currentStep === 0 || currentStep === 1) {
+        // Got name, now confirm phone
+        const formattedPhone = callerNumber.replace(/^\+1/, "").replace(/(\d{3})(\d{3})(\d{4})/, "($1) $2-$3");
+        const phoneConfirmUrl = `${functionsBase}/twilio-voice-conversation?call_id=${encodeURIComponent(callId || callSid)}&company_id=${encodeURIComponent(companyId)}&turn=${turnCount + 1}&callback_step=2`;
+        
+        await logAudit(supabase, companyId, "conversation_turn", "twilio_conversation", callId, {
+          turn: turnCount,
+          last_user_utterance: speechResult.substring(0, 500),
+          callback_step: currentStep,
+          is_after_hours: isAfterHours,
+        });
+
+        return buildTwimlResponse(
+          gather({
+            action: phoneConfirmUrl,
+            input: "speech",
+            timeout: 5,
+            speechTimeout: "auto",
+            hints: "yes, no, correct, wrong, yeah",
+            innerTwiml: say(`Got it${callbackFlowState.name ? `, ${callbackFlowState.name}` : ""}. Should we call you back at ${formattedPhone}?`),
+          }) +
+          say("Sorry — I didn't quite hear that. Want to try again?") +
+          `<Redirect method="POST">${escapeXml(phoneConfirmUrl)}</Redirect>`
+        );
+      }
+
+      // Step 2-3: Phone confirmed, ask for reason
+      if (currentStep === 2 || currentStep === 3) {
+        const reasonUrl = `${functionsBase}/twilio-voice-conversation?call_id=${encodeURIComponent(callId || callSid)}&company_id=${encodeURIComponent(companyId)}&turn=${turnCount + 1}&callback_step=4`;
+        
+        return buildTwimlResponse(
+          gather({
+            action: reasonUrl,
+            input: "speech",
+            timeout: 10,
+            speechTimeout: "auto",
+            innerTwiml: say("Great. Briefly, what should we call you about?"),
+          }) +
+          say("Sorry — I didn't quite hear that. Want to try again?") +
+          `<Redirect method="POST">${escapeXml(reasonUrl)}</Redirect>`
+        );
+      }
+
+      // Step 4: Got reason, ask urgency
+      if (currentStep === 4) {
+        const urgencyUrl = `${functionsBase}/twilio-voice-conversation?call_id=${encodeURIComponent(callId || callSid)}&company_id=${encodeURIComponent(companyId)}&turn=${turnCount + 1}&callback_step=5`;
+        
+        return buildTwimlResponse(
+          gather({
+            action: urgencyUrl,
+            input: "speech",
+            timeout: 5,
+            speechTimeout: "auto",
+            hints: "urgent, asap, no rush, whenever, normal",
+            innerTwiml: say("Thanks. Is this urgent, or can it wait until normal business hours?"),
+          }) +
+          say("Sorry — I didn't quite hear that. Want to try again?") +
+          `<Redirect method="POST">${escapeXml(urgencyUrl)}</Redirect>`
+        );
+      }
+
+      // Step 5: Complete - create followup task
+      if (currentStep === 5) {
+        console.log("[twilio-voice-conversation] Creating callback followup task");
+        
+        const taskTitle = `After-hours callback requested${callbackFlowState.urgency === "high" ? " (URGENT)" : ""}`;
+        const taskNotes = [
+          `Caller: ${callbackFlowState.name || "Unknown"}`,
+          `Callback number: ${callbackFlowState.callback_number || callerNumber}`,
+          `Reason: ${callbackFlowState.reason || "Not specified"}`,
+          `Urgency: ${callbackFlowState.urgency || "normal"}`,
+          `Call ID: ${callId || callSid}`,
+        ].join("\n");
+
+        // Create followup task
+        const { data: task, error: taskError } = await supabase.from("followup_tasks").insert({
+          company_id: companyId,
+          call_id: callId,
+          title: taskTitle,
+          notes: taskNotes,
+          status: "open",
+          due_at: callbackFlowState.urgency === "high" 
+            ? new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() // 2 hours
+            : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // Next day
+        }).select().single();
+
+        if (taskError) {
+          console.error("[twilio-voice-conversation] Error creating callback task:", taskError);
+        } else {
+          console.log("[twilio-voice-conversation] Created callback task:", task.id);
+        }
+
+        // Try to send SMS confirmation
+        let smsSent = false;
+        const phoneToSend = callbackFlowState.callback_number || callerNumber;
+        
+        try {
+          const smsMessage = `Hi${callbackFlowState.name ? ` ${callbackFlowState.name}` : ""}! Your callback request has been received. ${company?.name || "We"} will call you back${callbackFlowState.urgency === "high" ? " as soon as possible" : " during the next business day"}. Thank you!`;
+          
+          const smsResponse = await fetch(`${functionsBase}/twilio-send-sms`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              company_id: companyId,
+              to_phone: phoneToSend,
+              message: smsMessage,
+              call_id: callId,
+            }),
+          });
+
+          if (smsResponse.ok) {
+            smsSent = true;
+            console.log("[twilio-voice-conversation] Callback confirmation SMS sent");
+          }
+        } catch (smsError) {
+          console.error("[twilio-voice-conversation] SMS error:", smsError);
+        }
+
+        // Update call outcome
+        if (callId) {
+          await supabase.from("calls").update({ 
+            outcome: "callback_requested",
+            extracted_json: {
+              ...(await supabase.from("calls").select("extracted_json").eq("id", callId).single()).data?.extracted_json,
+              callback_flow: callbackFlowState,
+              callback_task_id: task?.id,
+              sms_confirmation_sent: smsSent,
+            },
+          }).eq("id", callId);
+        }
+
+        const successMessage = smsSent 
+          ? "Perfect! I've logged your callback request and sent you a text confirmation. Someone will reach out during the next business day. Is there anything else I can help with?"
+          : "Perfect! I've logged your callback request. Someone will reach out during the next business day. Is there anything else I can help with?";
+
+        await logAudit(supabase, companyId, "conversation_turn", "twilio_conversation", callId, {
+          turn: turnCount,
+          last_user_utterance: speechResult.substring(0, 500),
+          last_ai_response: successMessage,
+          callback_completed: true,
+          callback_task_id: task?.id,
+          sms_sent: smsSent,
+          is_after_hours: isAfterHours,
+        });
+
+        // Reset callback flow but stay in conversation
+        callbackFlowState = { active: false, step: 0 };
+
+        return buildTwimlResponse(
+          gather({
+            action: nextTurnUrl,
+            input: "speech",
+            timeout: 5,
+            speechTimeout: "auto",
+            innerTwiml: say(successMessage),
+          }) +
+          say("Thank you for calling. Have a great night!") +
+          `<Hangup />`
+        );
+      }
+    }
+
+    // Check for escalation triggers (during business hours)
+    if (!isAfterHours && speechResult) {
       const escalationCheck = shouldEscalate(speechResult, escalationRules);
       if (escalationCheck.escalate) {
         console.log("[twilio-voice-conversation] Escalating:", escalationCheck.reason);
@@ -513,6 +893,7 @@ Deno.serve(async (req) => {
           turn: turnCount,
           escalation_reason: escalationCheck.reason,
           last_user_utterance: speechResult.substring(0, 500),
+          is_after_hours: isAfterHours,
         });
 
         if (callId) {
@@ -546,16 +927,17 @@ Deno.serve(async (req) => {
     }
 
     // Handle greeting/small talk naturally before moving to business
-    if ((currentIntent === "greeting" || currentIntent === "small_talk") && turnCount <= 2 && !bookingFlowState.active) {
+    if ((currentIntent === "greeting" || currentIntent === "small_talk") && turnCount <= 2 && !bookingFlowState.active && !callbackFlowState.active) {
       const greetingResponse = currentIntent === "greeting" 
-        ? generateGreetingResponse(company?.name || "our office")
-        : generateSmallTalkResponse();
+        ? generateGreetingResponse(company?.name || "our office", isAfterHours)
+        : generateSmallTalkResponse(isAfterHours);
 
       await logAudit(supabase, companyId, "conversation_turn", "twilio_conversation", callId, {
         turn: turnCount,
         last_user_utterance: speechResult.substring(0, 500),
         last_ai_response: greetingResponse,
         intent: currentIntent,
+        is_after_hours: isAfterHours,
       });
 
       // Update state
@@ -584,7 +966,7 @@ Deno.serve(async (req) => {
           input: "speech",
           timeout: 5,
           speechTimeout: "auto",
-          hints: "booking, appointment, question, help, speak to someone",
+          hints: "booking, appointment, question, help, speak to someone, callback",
           innerTwiml: say(greetingResponse),
         }) +
         say("Sorry — I didn't quite hear that. Want to try again?") +
@@ -592,7 +974,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Handle booking flow
+    // Handle booking flow (same as before)
     if (bookingStep || bookingFlowState.active || (speechResult && detectBookingIntent(speechResult) && allowedActions.booking)) {
       const bookingTemplate = getBookingTemplate(company?.industry || null);
       
@@ -615,6 +997,23 @@ Deno.serve(async (req) => {
         }
 
         if (!company?.booking_link) {
+          if (isAfterHours) {
+            // After hours without booking link - offer callback
+            callbackFlowState = { active: true, step: 0 };
+            const callbackUrl = `${functionsBase}/twilio-voice-conversation?call_id=${encodeURIComponent(callId || callSid)}&company_id=${encodeURIComponent(companyId)}&turn=${turnCount + 1}&callback_step=1`;
+            
+            return buildTwimlResponse(
+              gather({
+                action: callbackUrl,
+                input: "speech",
+                timeout: 8,
+                speechTimeout: "auto",
+                innerTwiml: say("I'd love to help you book, but we're closed right now. I can have someone call you back to schedule. Can I get your name?"),
+              }) +
+              say("Sorry — I didn't quite hear that. Want to try again?") +
+              `<Redirect method="POST">${escapeXml(callbackUrl)}</Redirect>`
+            );
+          }
           return buildTwimlResponse(
             say("I'd love to help you book. Let me connect you with someone who can set that up.") +
             `<Redirect>${escapeXml(escalateUrl)}&amp;reason=booking_request</Redirect>`
@@ -655,6 +1054,7 @@ Deno.serve(async (req) => {
           last_ai_response: firstQuestion,
           booking_started: true,
           intent: "booking",
+          is_after_hours: isAfterHours,
         });
 
         const bookingUrl = `${functionsBase}/twilio-voice-conversation?call_id=${encodeURIComponent(callId || callSid)}&company_id=${encodeURIComponent(companyId)}&turn=${turnCount + 1}&booking_step=1`;
@@ -755,6 +1155,7 @@ Deno.serve(async (req) => {
             last_user_utterance: speechResult.substring(0, 500),
             last_ai_response: nextQuestion,
             booking_step: currentStep,
+            is_after_hours: isAfterHours,
           });
 
           const nextBookingUrl = `${functionsBase}/twilio-voice-conversation?call_id=${encodeURIComponent(callId || callSid)}&company_id=${encodeURIComponent(companyId)}&turn=${turnCount + 1}&booking_step=${currentStep + 1}`;
@@ -784,6 +1185,7 @@ Deno.serve(async (req) => {
             last_user_utterance: speechResult.substring(0, 500),
             last_ai_response: phoneConfirmMessage,
             booking_step: currentStep,
+            is_after_hours: isAfterHours,
           });
 
           return buildTwimlResponse(
@@ -835,6 +1237,7 @@ Deno.serve(async (req) => {
               last_ai_response: successMessage,
               booking_completed: true,
               sms_sent: true,
+              is_after_hours: isAfterHours,
             });
 
             if (callId) {
@@ -895,10 +1298,29 @@ Deno.serve(async (req) => {
     if (turnCount >= maxTurns) {
       console.log("[twilio-voice-conversation] Max turns reached, offering escalation");
 
+      if (isAfterHours) {
+        // After hours - offer callback instead
+        callbackFlowState = { active: true, step: 0 };
+        const callbackUrl = `${functionsBase}/twilio-voice-conversation?call_id=${encodeURIComponent(callId || callSid)}&company_id=${encodeURIComponent(companyId)}&turn=${turnCount + 1}&callback_step=1`;
+        
+        return buildTwimlResponse(
+          gather({
+            action: callbackUrl,
+            input: "speech",
+            timeout: 8,
+            speechTimeout: "auto",
+            innerTwiml: say("I want to make sure you get the help you need. Since we're closed, can I set up a callback for you? What's your name?"),
+          }) +
+          say("Sorry — I didn't quite hear that. Want to try again?") +
+          `<Redirect method="POST">${escapeXml(callbackUrl)}</Redirect>`
+        );
+      }
+
       await logAudit(supabase, companyId, "conversation_turn", "twilio_conversation", callId, {
         turn: turnCount,
         last_user_utterance: speechResult.substring(0, 500),
         max_turns_reached: true,
+        is_after_hours: isAfterHours,
       });
 
       return buildTwimlResponse(
@@ -937,6 +1359,14 @@ Deno.serve(async (req) => {
           ? `This is turn ${turnCount} of the conversation. Keep responses brief and natural.`
           : "";
 
+        // After-hours context
+        const afterHoursContext = isAfterHours
+          ? `\nIMPORTANT: It is currently after hours. The business is closed.
+- If asked to transfer to a person, say: "I can't connect you right now since we're closed, but I can create a callback request for the next business day."
+- Be helpful but remind them the office is closed if relevant.
+- Offer to take a message or create a callback request if they need to speak to someone.`
+          : "";
+
         const systemPrompt = `You are a friendly phone receptionist for ${company?.name || "the company"}.
 
 ${aiProfile?.system_prompt || "Be helpful and warm."}
@@ -944,8 +1374,8 @@ ${aiProfile?.system_prompt || "Be helpful and warm."}
 RULES:
 1. Keep responses to 1-2 sentences max
 2. Sound natural, not robotic
-3. If you don't know something, offer to transfer to a team member
-4. Never make up information${bookingInfo}
+3. If you don't know something, offer to transfer to a team member (or take a message if after hours)
+4. Never make up information${bookingInfo}${afterHoursContext}
 
 ${contextNote}
 
@@ -1004,6 +1434,7 @@ ${kbContext || "No specific info available."}`;
       last_ai_response: aiResponse.substring(0, 500),
       confidence,
       intent: currentIntent,
+      is_after_hours: isAfterHours,
     });
 
     // Update call transcript and state
@@ -1045,7 +1476,7 @@ ${kbContext || "No specific info available."}`;
         input: "speech",
         timeout: 5,
         speechTimeout: "auto",
-        hints: "yes, no, booking, appointment, schedule, quote, question, help, speak to someone, transfer, thank you, goodbye, that's all",
+        hints: "yes, no, booking, appointment, schedule, quote, question, help, speak to someone, transfer, thank you, goodbye, that's all, callback",
         innerTwiml: say(fullResponse),
       }) +
       say("Sorry — I didn't quite hear that. Want to try again?") +
