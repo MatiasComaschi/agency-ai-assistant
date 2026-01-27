@@ -60,32 +60,50 @@ export default function Auth() {
   const fetchInviteDetails = async (token: string) => {
     setIsLoadingInvite(true);
     try {
-      const { data, error } = await supabase
+      // First fetch the invite without the join (RLS may block unauthenticated access to companies)
+      const { data: inviteData, error: inviteError } = await supabase
         .from('company_invites')
-        .select('token, email, role, company_id, companies(name)')
+        .select('token, email, role, company_id')
         .eq('token', token)
         .is('accepted_at', null)
         .gt('expires_at', new Date().toISOString())
-        .single();
+        .maybeSingle();
 
-      if (error || !data) {
+      if (inviteError || !inviteData) {
+        console.error('Invite fetch error:', inviteError);
         toast.error('Invalid or expired invite link');
         return;
       }
 
-      const companyData = data.companies as unknown as { name: string } | null;
-      
+      // Fetch company name separately using an edge function or public endpoint
+      // For now, we'll show the company name after the user authenticates
+      // But we can try to fetch it - it might work if RLS allows
+      let companyName = 'your new team';
+      try {
+        const { data: companyData } = await supabase
+          .from('companies')
+          .select('name')
+          .eq('id', inviteData.company_id)
+          .maybeSingle();
+        
+        if (companyData?.name) {
+          companyName = companyData.name;
+        }
+      } catch {
+        // Company name fetch failed, use default
+      }
+
       setInviteDetails({
-        token: data.token,
-        email: data.email,
-        role: data.role,
-        companyId: data.company_id,
-        companyName: companyData?.name || 'Unknown Company',
+        token: inviteData.token,
+        email: inviteData.email,
+        role: inviteData.role,
+        companyId: inviteData.company_id,
+        companyName,
       });
 
       // Pre-fill email
-      setSignupEmail(data.email);
-      setLoginEmail(data.email);
+      setSignupEmail(inviteData.email);
+      setLoginEmail(inviteData.email);
     } catch (err) {
       console.error('Error fetching invite:', err);
       toast.error('Failed to load invite details');
@@ -94,34 +112,24 @@ export default function Auth() {
     }
   };
 
-  // Accept invite and create membership
-  const acceptInvite = async (userId: string) => {
+  // Accept invite via edge function (handles RLS bypass)
+  const acceptInvite = async () => {
     if (!inviteDetails) return;
 
     try {
-      // Create membership
-      const { error: membershipError } = await supabase.from('memberships').insert({
-        user_id: userId,
-        company_id: inviteDetails.companyId,
-        role: inviteDetails.role,
+      const { data, error } = await supabase.functions.invoke('accept-invite', {
+        body: { token: inviteDetails.token }
       });
 
-      if (membershipError) {
-        // Check if already a member
-        if (membershipError.code === '23505') {
-          console.log('User is already a member of this company');
-        } else {
-          throw membershipError;
-        }
+      if (error) {
+        console.error('Accept invite error:', error);
+        toast.error('Failed to accept invite');
+        return;
       }
 
-      // Mark invite as accepted
-      await supabase
-        .from('company_invites')
-        .update({ accepted_at: new Date().toISOString() })
-        .eq('token', inviteDetails.token);
-
-      toast.success(`Welcome to ${inviteDetails.companyName}!`);
+      if (data?.success) {
+        toast.success(`Welcome to ${data.companyName || inviteDetails.companyName}!`);
+      }
     } catch (err) {
       console.error('Error accepting invite:', err);
       toast.error('Failed to accept invite');
@@ -138,7 +146,7 @@ export default function Auth() {
 
   // If user is logged in and there's an invite, accept it
   if (user && inviteDetails) {
-    acceptInvite(user.id).then(() => {
+    acceptInvite().then(() => {
       // Redirect after accepting
       window.location.href = '/company';
     });
@@ -146,7 +154,7 @@ export default function Auth() {
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center">
           <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-4" />
-          <p className="text-muted-foreground">Accepting invite...</p>
+          <p className="text-muted-foreground">Joining {inviteDetails.companyName}...</p>
         </div>
       </div>
     );

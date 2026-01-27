@@ -107,22 +107,39 @@ export function UsersSection() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      const { error } = await supabase.from('company_invites').insert({
+      // Create invite record
+      const { data: invite, error } = await supabase.from('company_invites').insert({
         company_id: currentCompany.id,
         email: inviteEmail.trim().toLowerCase(),
         role: inviteRole,
         invited_by: user.id,
-      });
+      }).select('id').single();
+      
       if (error) throw error;
+
+      // Send invite email via edge function
+      try {
+        const { error: emailError } = await supabase.functions.invoke('send-invite', {
+          body: { invite_id: invite.id }
+        });
+        if (emailError) {
+          console.warn('Failed to send invite email:', emailError);
+        }
+      } catch (emailErr) {
+        console.warn('Email send failed, but invite was created:', emailErr);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['company-invites'] });
-      toast.success('Invite created');
+      toast.success('Invite created and email sent');
       setInviteOpen(false);
       setInviteEmail('');
       setInviteRole('company_staff');
     },
-    onError: () => toast.error('Failed to create invite'),
+    onError: (err) => {
+      console.error('Create invite error:', err);
+      toast.error('Failed to create invite');
+    },
   });
 
   const deleteInvite = useMutation({

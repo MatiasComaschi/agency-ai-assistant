@@ -1,5 +1,11 @@
 project_id = "rlwbztjdfmndagnenwog"
 
+[functions.send-invite]
+verify_jwt = true
+
+[functions.accept-invite]
+verify_jwt = false
+
 [functions.ai-simulator]
 verify_jwt = false
 
