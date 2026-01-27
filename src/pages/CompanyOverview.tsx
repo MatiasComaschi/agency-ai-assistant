@@ -2,16 +2,32 @@ import { motion } from 'framer-motion';
 import { useCompany } from '@/contexts/CompanyContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CompanyHoursEditor } from '@/components/company/CompanyHoursEditor';
 import { CompanyStatsCards } from '@/components/company/CompanyStatsCards';
 import { TodaysCallsTable } from '@/components/company/TodaysCallsTable';
 import { QuickActions } from '@/components/company/QuickActions';
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
+
+// Import section components
+import AIReceptionistSection from '@/components/company-sections/AIReceptionistSection';
+import KnowledgeBaseSection from '@/components/company-sections/KnowledgeBaseSection';
+import ServicesSection from '@/components/company-sections/ServicesSection';
+import StaffSection from '@/components/company-sections/StaffSection';
+import AppointmentsSection from '@/components/company-sections/AppointmentsSection';
+import CallsSection from '@/components/company-sections/CallsSection';
+import TeamSection from '@/components/company-sections/TeamSection';
 
 export default function CompanyOverview() {
   const { currentCompany, isLoading, refetchCompanies } = useCompany();
   const { isAgencyAdmin } = useAuth();
   const [aiEnabled, setAiEnabled] = useState(true);
+  const [searchParams, setSearchParams] = useSearchParams();
+  
+  // Get initial tab from URL or default to 'overview'
+  const initialTab = searchParams.get('tab') || 'overview';
+  const [activeTab, setActiveTab] = useState(initialTab);
 
   // Sync aiEnabled with currentCompany when it loads
   useEffect(() => {
@@ -19,6 +35,17 @@ export default function CompanyOverview() {
       setAiEnabled(currentCompany.ai_enabled);
     }
   }, [currentCompany]);
+
+  // Update URL when tab changes
+  const handleTabChange = (value: string) => {
+    setActiveTab(value);
+    if (value === 'overview') {
+      searchParams.delete('tab');
+    } else {
+      searchParams.set('tab', value);
+    }
+    setSearchParams(searchParams, { replace: true });
+  };
 
   if (isLoading) {
     return <div className="p-8 text-center text-muted-foreground">Loading...</div>;
@@ -58,24 +85,76 @@ export default function CompanyOverview() {
         </div>
       </div>
 
-      {/* Stats - Company-scoped, operational only */}
-      <CompanyStatsCards companyId={currentCompany.id} />
+      {/* Tabbed Navigation */}
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
+        <TabsList className="grid w-full grid-cols-4 lg:grid-cols-8 h-auto gap-1 bg-muted p-1">
+          <TabsTrigger value="overview" className="text-xs sm:text-sm">Overview</TabsTrigger>
+          <TabsTrigger value="ai" className="text-xs sm:text-sm">AI Profile</TabsTrigger>
+          <TabsTrigger value="kb" className="text-xs sm:text-sm">Knowledge</TabsTrigger>
+          <TabsTrigger value="services" className="text-xs sm:text-sm">Services</TabsTrigger>
+          <TabsTrigger value="staff" className="text-xs sm:text-sm">Staff</TabsTrigger>
+          <TabsTrigger value="appointments" className="text-xs sm:text-sm">Appts</TabsTrigger>
+          <TabsTrigger value="calls" className="text-xs sm:text-sm">Calls</TabsTrigger>
+          <TabsTrigger value="team" className="text-xs sm:text-sm">Team</TabsTrigger>
+        </TabsList>
 
-      {/* Quick Actions */}
-      <QuickActions 
-        companyId={currentCompany.id} 
-        aiEnabled={aiEnabled}
-        onAiToggle={handleAiToggle}
-      />
+        {/* Overview Tab */}
+        <TabsContent value="overview" className="space-y-6 mt-6">
+          {/* Stats - Company-scoped, operational only */}
+          <CompanyStatsCards companyId={currentCompany.id} />
 
-      {/* Two-column layout for hours and calls */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Working Hours */}
-        <CompanyHoursEditor companyId={currentCompany.id} />
+          {/* Quick Actions */}
+          <QuickActions 
+            companyId={currentCompany.id} 
+            aiEnabled={aiEnabled}
+            onAiToggle={handleAiToggle}
+          />
 
-        {/* Today's Calls Table */}
-        <TodaysCallsTable companyId={currentCompany.id} />
-      </div>
+          {/* Two-column layout for hours and calls */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Working Hours */}
+            <CompanyHoursEditor companyId={currentCompany.id} />
+
+            {/* Today's Calls Table */}
+            <TodaysCallsTable companyId={currentCompany.id} />
+          </div>
+        </TabsContent>
+
+        {/* AI Receptionist Tab */}
+        <TabsContent value="ai" className="mt-6">
+          <AIReceptionistSection company={currentCompany} />
+        </TabsContent>
+
+        {/* Knowledge Base Tab */}
+        <TabsContent value="kb" className="mt-6">
+          <KnowledgeBaseSection companyId={currentCompany.id} />
+        </TabsContent>
+
+        {/* Services Tab */}
+        <TabsContent value="services" className="mt-6">
+          <ServicesSection companyId={currentCompany.id} />
+        </TabsContent>
+
+        {/* Staff Tab */}
+        <TabsContent value="staff" className="mt-6">
+          <StaffSection companyId={currentCompany.id} />
+        </TabsContent>
+
+        {/* Appointments Tab */}
+        <TabsContent value="appointments" className="mt-6">
+          <AppointmentsSection companyId={currentCompany.id} />
+        </TabsContent>
+
+        {/* Calls Tab */}
+        <TabsContent value="calls" className="mt-6">
+          <CallsSection companyId={currentCompany.id} />
+        </TabsContent>
+
+        {/* Team Tab */}
+        <TabsContent value="team" className="mt-6">
+          <TeamSection companyId={currentCompany.id} />
+        </TabsContent>
+      </Tabs>
     </motion.div>
   );
 }

@@ -37,20 +37,11 @@ const agencyItems = [
   { label: 'Templates', icon: FileText, path: '/agency/templates' },
   { label: 'Bulk Import', icon: Upload, path: '/agency/bulk-import' },
   { label: 'Support Console', icon: Headphones, path: '/agency/support' },
-  { label: 'Audit Log', icon: History, path: '/agency/audit-log' },
   { label: 'Platform Settings', icon: Code, path: '/agency/platform' },
-  { label: 'Admin Settings', icon: Shield, path: '/agency/admin-settings' },
 ];
 
 const companyItems = [
   { label: 'Company Overview', icon: Building2, path: '/company' },
-  { label: 'AI Receptionist', icon: Bot, path: '/ai-receptionist' },
-  { label: 'Knowledge Base', icon: BookOpen, path: '/knowledge-base' },
-  { label: 'Services', icon: Package, path: '/services' },
-  { label: 'Staff', icon: UserCheck, path: '/staff' },
-  { label: 'Appointments', icon: CalendarCheck, path: '/appointments' },
-  { label: 'Call Logs', icon: Phone, path: '/calls' },
-  { label: 'Team', icon: Users, path: '/team' },
   { label: 'Integrations', icon: Puzzle, path: '/integrations' },
   { label: 'Billing', icon: CreditCard, path: '/billing' },
   { label: 'Settings', icon: Settings, path: '/settings' },
