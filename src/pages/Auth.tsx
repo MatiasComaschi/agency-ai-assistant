@@ -32,12 +32,21 @@ interface InviteDetails {
   companyName: string;
 }
 
+interface TrialInviteDetails {
+  token: string;
+  email: string;
+  companyName: string;
+  plan: string;
+  trialDays: number;
+}
+
 export default function Auth() {
   const { user, isLoading, signIn, signUp } = useAuth();
   const [searchParams] = useSearchParams();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [inviteDetails, setInviteDetails] = useState<InviteDetails | null>(null);
+  const [trialInviteDetails, setTrialInviteDetails] = useState<TrialInviteDetails | null>(null);
   const [isLoadingInvite, setIsLoadingInvite] = useState(false);
 
   // Login form state
@@ -49,11 +58,14 @@ export default function Auth() {
   const [signupEmail, setSignupEmail] = useState('');
   const [signupPassword, setSignupPassword] = useState('');
 
-  // Check for invite token in URL
+  // Check for invite token or trial token in URL
   useEffect(() => {
     const inviteToken = searchParams.get('invite');
+    const trialToken = searchParams.get('trial');
     if (inviteToken) {
       fetchInviteDetails(inviteToken);
+    } else if (trialToken) {
+      fetchTrialInviteDetails(trialToken);
     }
   }, [searchParams]);
 
@@ -112,6 +124,42 @@ export default function Auth() {
     }
   };
 
+  const fetchTrialInviteDetails = async (token: string) => {
+    setIsLoadingInvite(true);
+    try {
+      const { data: inviteData, error: inviteError } = await supabase
+        .from('trial_invites')
+        .select('token, email, company_name, plan, trial_days')
+        .eq('token', token)
+        .is('accepted_at', null)
+        .gt('expires_at', new Date().toISOString())
+        .maybeSingle();
+
+      if (inviteError || !inviteData) {
+        console.error('Trial invite fetch error:', inviteError);
+        toast.error('Invalid or expired trial invite link');
+        return;
+      }
+
+      setTrialInviteDetails({
+        token: inviteData.token,
+        email: inviteData.email,
+        companyName: inviteData.company_name,
+        plan: inviteData.plan,
+        trialDays: inviteData.trial_days,
+      });
+
+      // Pre-fill email
+      setSignupEmail(inviteData.email);
+      setLoginEmail(inviteData.email);
+    } catch (err) {
+      console.error('Error fetching trial invite:', err);
+      toast.error('Failed to load trial invite details');
+    } finally {
+      setIsLoadingInvite(false);
+    }
+  };
+
   // Accept invite via edge function (handles RLS bypass)
   const acceptInvite = async () => {
     if (!inviteDetails) return;
@@ -136,6 +184,30 @@ export default function Auth() {
     }
   };
 
+  // Accept trial invite via edge function
+  const acceptTrialInvite = async () => {
+    if (!trialInviteDetails) return;
+
+    try {
+      const { data, error } = await supabase.functions.invoke('accept-trial-invite', {
+        body: { token: trialInviteDetails.token }
+      });
+
+      if (error) {
+        console.error('Accept trial invite error:', error);
+        toast.error('Failed to activate trial');
+        return;
+      }
+
+      if (data?.success) {
+        toast.success(`Welcome! Your ${trialInviteDetails.trialDays}-day trial of ${trialInviteDetails.companyName} is now active.`);
+      }
+    } catch (err) {
+      console.error('Error accepting trial invite:', err);
+      toast.error('Failed to activate trial');
+    }
+  };
+
   if (isLoading || isLoadingInvite) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -147,7 +219,6 @@ export default function Auth() {
   // If user is logged in and there's an invite, accept it
   if (user && inviteDetails) {
     acceptInvite().then(() => {
-      // Redirect after accepting
       window.location.href = '/company';
     });
     return (
@@ -155,6 +226,21 @@ export default function Auth() {
         <div className="text-center">
           <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-4" />
           <p className="text-muted-foreground">Joining {inviteDetails.companyName}...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // If user is logged in and there's a trial invite, accept it
+  if (user && trialInviteDetails) {
+    acceptTrialInvite().then(() => {
+      window.location.href = '/company';
+    });
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-4" />
+          <p className="text-muted-foreground">Activating your {trialInviteDetails.trialDays}-day trial...</p>
         </div>
       </div>
     );
@@ -260,8 +346,21 @@ export default function Auth() {
           </Alert>
         )}
 
+        {/* Trial Invite Banner */}
+        {trialInviteDetails && (
+          <Alert className="mb-4 border-primary/20 bg-primary/5">
+            <UserPlus className="h-4 w-4" />
+            <AlertDescription>
+              🎉 You've been invited to try <strong>{trialInviteDetails.companyName}</strong> with a{' '}
+              <strong>{trialInviteDetails.trialDays}-day free trial</strong> of the{' '}
+              <strong>{trialInviteDetails.plan === 'pro' ? 'Pro' : 'Starter'}</strong> plan.
+              Sign in or create an account to get started!
+            </AlertDescription>
+          </Alert>
+        )}
+
         <Card className="shadow-lg border-border/50">
-          <Tabs defaultValue={inviteDetails ? 'signup' : 'login'} className="w-full">
+          <Tabs defaultValue={inviteDetails || trialInviteDetails ? 'signup' : 'login'} className="w-full">
             <CardHeader className="pb-4">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="login">Sign In</TabsTrigger>
@@ -312,7 +411,7 @@ export default function Auth() {
                     {isSubmitting ? (
                       <Loader2 className="h-4 w-4 animate-spin mr-2" />
                     ) : null}
-                    {inviteDetails ? 'Sign In & Accept Invite' : 'Sign In'}
+                    {inviteDetails ? 'Sign In & Accept Invite' : trialInviteDetails ? 'Sign In & Start Trial' : 'Sign In'}
                   </Button>
                 </form>
               </TabsContent>
@@ -348,7 +447,7 @@ export default function Auth() {
                         value={signupEmail}
                         onChange={(e) => setSignupEmail(e.target.value)}
                         className="pl-10"
-                        disabled={!!inviteDetails}
+                        disabled={!!inviteDetails || !!trialInviteDetails}
                       />
                     </div>
                     {errors.email && (
@@ -378,7 +477,7 @@ export default function Auth() {
                     {isSubmitting ? (
                       <Loader2 className="h-4 w-4 animate-spin mr-2" />
                     ) : null}
-                    {inviteDetails ? 'Create Account & Join Team' : 'Create Account'}
+                    {inviteDetails ? 'Create Account & Join Team' : trialInviteDetails ? 'Create Account & Start Trial' : 'Create Account'}
                   </Button>
                 </form>
               </TabsContent>

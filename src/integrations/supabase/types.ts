@@ -1196,6 +1196,45 @@ export type Database = {
           },
         ]
       }
+      trial_invites: {
+        Row: {
+          accepted_at: string | null
+          company_name: string
+          created_at: string
+          email: string
+          expires_at: string
+          id: string
+          invited_by: string
+          plan: string
+          token: string
+          trial_days: number
+        }
+        Insert: {
+          accepted_at?: string | null
+          company_name: string
+          created_at?: string
+          email: string
+          expires_at?: string
+          id?: string
+          invited_by: string
+          plan?: string
+          token?: string
+          trial_days?: number
+        }
+        Update: {
+          accepted_at?: string | null
+          company_name?: string
+          created_at?: string
+          email?: string
+          expires_at?: string
+          id?: string
+          invited_by?: string
+          plan?: string
+          token?: string
+          trial_days?: number
+        }
+        Relationships: []
+      }
       usage: {
         Row: {
           calls_count: number
