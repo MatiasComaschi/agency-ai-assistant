@@ -59,3 +59,9 @@ verify_jwt = false
 
 [functions.twilio-phone-numbers]
 verify_jwt = false
+
+[functions.update-call-usage]
+verify_jwt = false
+
+[functions.report-usage-to-stripe]
+verify_jwt = false

@@ -16,15 +16,6 @@ const twimlResponse = (body: string): Response => {
   );
 };
 
-const escapeXml = (text: string): string => {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-};
-
 // Audit logging helper
 // deno-lint-ignore no-explicit-any
 async function logAudit(
@@ -47,6 +38,41 @@ async function logAudit(
     });
   } catch (err) {
     console.error("[twilio-voice-dial-complete] Audit log error:", err);
+  }
+}
+
+// Update usage with call duration
+async function updateCallUsage(
+  supabaseUrl: string,
+  companyId: string,
+  callId: string,
+  durationSeconds: number
+): Promise<void> {
+  try {
+    console.log(`[twilio-voice-dial-complete] Updating usage: ${durationSeconds}s for call ${callId}`);
+    
+    const response = await fetch(`${supabaseUrl}/functions/v1/update-call-usage`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${Deno.env.get("SUPABASE_ANON_KEY")}`,
+      },
+      body: JSON.stringify({
+        company_id: companyId,
+        call_id: callId,
+        duration_seconds: durationSeconds,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("[twilio-voice-dial-complete] Usage update failed:", errorText);
+    } else {
+      const result = await response.json();
+      console.log("[twilio-voice-dial-complete] Usage updated:", result);
+    }
+  } catch (err) {
+    console.error("[twilio-voice-dial-complete] Error calling update-call-usage:", err);
   }
 }
 
@@ -151,13 +177,14 @@ Deno.serve(async (req) => {
         outcome = "escalated_failed";
       }
 
-      // Update call log with final status
+      // Update call log with final status and duration
       const { error: updateError } = await supabase
         .from("calls")
         .update({
           recording_url: recordingUrl || (existingJson.recording_url as string) || null,
           outcome,
           ended_at: new Date().toISOString(),
+          duration_seconds: dialDuration,
           cost_cents: existingCost + callCostCents,
           extracted_json: {
             ...existingJson,
@@ -171,7 +198,12 @@ Deno.serve(async (req) => {
       if (updateError) {
         console.error("[twilio-voice-dial-complete] Error updating call log:", updateError);
       } else {
-        console.log("[twilio-voice-dial-complete] Updated call log:", callId, "outcome:", outcome);
+        console.log("[twilio-voice-dial-complete] Updated call log:", callId, "outcome:", outcome, "duration:", dialDuration);
+      }
+
+      // Update usage tracking with call duration (for minute-based billing)
+      if (companyId && dialDuration > 0) {
+        await updateCallUsage(supabaseUrl, companyId, callId, dialDuration);
       }
 
       // Create follow-up task if call was not completed
@@ -195,7 +227,7 @@ Deno.serve(async (req) => {
       
       const { data: callByCallSid } = await supabase
         .from("calls")
-        .select("id")
+        .select("id, company_id")
         .eq("extracted_json->>call_sid", callId)
         .single();
       
@@ -205,7 +237,13 @@ Deno.serve(async (req) => {
         await supabase.from("calls").update({
           outcome: dialStatus === "completed" ? "escalated_completed" : `escalated_${dialStatus}`,
           ended_at: new Date().toISOString(),
+          duration_seconds: dialDuration,
         }).eq("id", callByCallSid.id);
+
+        // Update usage tracking
+        if (callByCallSid.company_id && dialDuration > 0) {
+          await updateCallUsage(supabaseUrl, callByCallSid.company_id, callByCallSid.id, dialDuration);
+        }
       } else {
         console.warn("[twilio-voice-dial-complete] Could not find call by CallSid:", callId);
       }
