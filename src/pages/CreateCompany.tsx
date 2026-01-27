@@ -32,11 +32,14 @@ import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import type { DaySchedule, HolidayInput } from '@/types';
 
+import { TemplateSelector } from '@/components/company/TemplateSelector';
+
 const steps = [
-  { id: 1, title: 'Company Basics', icon: Building2 },
-  { id: 2, title: 'Business Hours', icon: Clock },
-  { id: 3, title: 'Contact Routing', icon: Phone },
-  { id: 4, title: 'AI Preset', icon: Bot },
+  { id: 1, title: 'Template', icon: Building2 },
+  { id: 2, title: 'Company Basics', icon: Building2 },
+  { id: 3, title: 'Business Hours', icon: Clock },
+  { id: 4, title: 'Contact Routing', icon: Phone },
+  { id: 5, title: 'AI Preset', icon: Bot },
 ];
 
 const industries = [
@@ -80,6 +83,7 @@ const step1Schema = z.object({
 });
 
 interface FormData {
+  templateId: string | null;
   name: string;
   industry: string;
   timezone: string;
@@ -102,6 +106,7 @@ export default function CreateCompany() {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const [formData, setFormData] = useState<FormData>({
+    templateId: null,
     name: '',
     industry: '',
     timezone: 'America/New_York',
@@ -152,7 +157,7 @@ export default function CreateCompany() {
 
   const validateStep = (step: number): boolean => {
     setErrors({});
-    if (step === 1) {
+    if (step === 2) {
       const result = step1Schema.safeParse({
         name: formData.name,
         industry: formData.industry,
@@ -171,10 +176,30 @@ export default function CreateCompany() {
   };
 
   const nextStep = () => {
-    if (validateStep(currentStep)) setCurrentStep((prev) => Math.min(prev + 1, 4));
+    if (validateStep(currentStep)) setCurrentStep((prev) => Math.min(prev + 1, 5));
   };
 
   const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 1));
+  
+  // Apply template when selected
+  const applyTemplate = async (templateId: string | null) => {
+    updateField('templateId', templateId);
+    
+    if (!templateId) return;
+    
+    const { data: template } = await supabase
+      .from('industry_templates')
+      .select('*')
+      .eq('id', templateId)
+      .single();
+    
+    if (template) {
+      updateField('industry', template.industry);
+      updateField('ai_tone', template.tone || 'professional');
+      updateField('ai_voice', template.voice_id || 'female');
+      updateField('ai_language', template.language || 'en-US');
+    }
+  };
 
   const handleSubmit = async () => {
     if (!validateStep(currentStep) || !user) return;
@@ -307,6 +332,21 @@ export default function CreateCompany() {
           {currentStep === 1 && (
             <motion.div key="step1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
               <CardHeader>
+                <CardTitle>Choose a Template (Optional)</CardTitle>
+                <CardDescription>Start with a pre-configured template or skip to create from scratch</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <TemplateSelector
+                  selectedTemplateId={formData.templateId}
+                  onSelect={applyTemplate}
+                />
+              </CardContent>
+            </motion.div>
+          )}
+
+          {currentStep === 2 && (
+            <motion.div key="step2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+              <CardHeader>
                 <CardTitle>Company Basics</CardTitle>
                 <CardDescription>Enter the basic information about your client's company</CardDescription>
               </CardHeader>
@@ -344,8 +384,8 @@ export default function CreateCompany() {
             </motion.div>
           )}
 
-          {currentStep === 2 && (
-            <motion.div key="step2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+          {currentStep === 3 && (
+            <motion.div key="step3" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
               <CardHeader>
                 <CardTitle>Business Hours</CardTitle>
                 <CardDescription>Set the weekly schedule and any holidays</CardDescription>
@@ -415,8 +455,8 @@ export default function CreateCompany() {
             </motion.div>
           )}
 
-          {currentStep === 3 && (
-            <motion.div key="step3" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+          {currentStep === 4 && (
+            <motion.div key="step4" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
               <CardHeader>
                 <CardTitle>Contact Routing</CardTitle>
                 <CardDescription>Configure how calls should be routed and escalated</CardDescription>
@@ -459,8 +499,8 @@ export default function CreateCompany() {
             </motion.div>
           )}
 
-          {currentStep === 4 && (
-            <motion.div key="step4" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+          {currentStep === 5 && (
+            <motion.div key="step5" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
               <CardHeader>
                 <CardTitle>AI Preset</CardTitle>
                 <CardDescription>Configure the AI receptionist defaults</CardDescription>
@@ -511,7 +551,7 @@ export default function CreateCompany() {
             <ArrowLeft className="h-4 w-4 mr-2" />
             Previous
           </Button>
-          {currentStep < 4 ? (
+          {currentStep < 5 ? (
             <Button onClick={nextStep} className="bg-accent hover:bg-accent/90">
               Next
               <ArrowRight className="h-4 w-4 ml-2" />
