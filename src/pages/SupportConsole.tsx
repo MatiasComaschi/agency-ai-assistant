@@ -49,6 +49,7 @@ import { format, startOfDay, endOfDay } from 'date-fns';
 import { TicketList } from '@/components/support/TicketList';
 import { SystemEvents } from '@/components/support/SystemEvents';
 import { SystemStatus } from '@/components/support/SystemStatus';
+import { VerificationHarness } from '@/components/debug/VerificationHarness';
 import type { Call, Company } from '@/types';
 
 interface CallWithCompany extends Call {
@@ -498,8 +499,9 @@ export default function SupportConsole() {
           <SystemEvents companyFilter={filterCompany} />
         </TabsContent>
 
-        <TabsContent value="status">
+        <TabsContent value="status" className="space-y-6">
           <SystemStatus />
+          <VerificationHarness />
         </TabsContent>
       </Tabs>
     </div>

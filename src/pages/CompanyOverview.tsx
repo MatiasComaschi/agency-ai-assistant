@@ -18,6 +18,7 @@ import StaffSection from '@/components/company-sections/StaffSection';
 import AppointmentsSection from '@/components/company-sections/AppointmentsSection';
 import CallsSection from '@/components/company-sections/CallsSection';
 import TeamSection from '@/components/company-sections/TeamSection';
+import { UsersSection } from '@/components/company-sections/UsersSection';
 
 export default function CompanyOverview() {
   const { currentCompany, isLoading, refetchCompanies } = useCompany();
@@ -87,7 +88,7 @@ export default function CompanyOverview() {
 
       {/* Tabbed Navigation */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-        <TabsList className="grid w-full grid-cols-4 lg:grid-cols-8 h-auto gap-1 bg-muted p-1">
+        <TabsList className="grid w-full grid-cols-5 lg:grid-cols-9 h-auto gap-1 bg-muted p-1">
           <TabsTrigger value="overview" className="text-xs sm:text-sm">Overview</TabsTrigger>
           <TabsTrigger value="ai" className="text-xs sm:text-sm">AI Profile</TabsTrigger>
           <TabsTrigger value="kb" className="text-xs sm:text-sm">Knowledge</TabsTrigger>
@@ -96,6 +97,7 @@ export default function CompanyOverview() {
           <TabsTrigger value="appointments" className="text-xs sm:text-sm">Appts</TabsTrigger>
           <TabsTrigger value="calls" className="text-xs sm:text-sm">Calls</TabsTrigger>
           <TabsTrigger value="team" className="text-xs sm:text-sm">Team</TabsTrigger>
+          <TabsTrigger value="users" className="text-xs sm:text-sm">Users</TabsTrigger>
         </TabsList>
 
         {/* Overview Tab */}
@@ -153,6 +155,11 @@ export default function CompanyOverview() {
         {/* Team Tab */}
         <TabsContent value="team" className="mt-6">
           <TeamSection companyId={currentCompany.id} />
+        </TabsContent>
+
+        {/* Users Tab */}
+        <TabsContent value="users" className="mt-6">
+          <UsersSection />
         </TabsContent>
       </Tabs>
     </motion.div>
