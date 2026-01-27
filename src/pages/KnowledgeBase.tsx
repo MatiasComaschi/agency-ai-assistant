@@ -1,19 +1,20 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Search, Pencil, Trash2, BookOpen, Upload, Download, Loader2, X } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, BookOpen, Download, Loader2 } from 'lucide-react';
 import { useCompany } from '@/contexts/CompanyContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { CompanySelector } from '@/components/company/CompanySelector';
+import { BulkKBImport } from '@/components/knowledge-base/BulkKBImport';
 import type { KnowledgeBaseItem } from '@/types';
 
 export default function KnowledgeBase() {
@@ -28,12 +29,6 @@ export default function KnowledgeBase() {
   // Edit state
   const [editingItem, setEditingItem] = useState<KnowledgeBaseItem | null>(null);
   const [editForm, setEditForm] = useState({ type: 'faq', title: '', answer: '', question: '' });
-  
-  // Import state
-  const [isImportOpen, setIsImportOpen] = useState(false);
-  const [importData, setImportData] = useState<Array<Record<string, string>>>([]);
-  const [columnMapping, setColumnMapping] = useState<Record<string, string>>({});
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (currentCompany) fetchItems();
@@ -120,67 +115,6 @@ export default function KnowledgeBase() {
     }
   };
 
-  // CSV Import
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target?.result as string;
-      const lines = text.split('\n').filter(line => line.trim());
-      if (lines.length < 2) {
-        toast.error('CSV file must have headers and at least one row');
-        return;
-      }
-
-      const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-      const rows = lines.slice(1).map(line => {
-        const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
-        const row: Record<string, string> = {};
-        headers.forEach((h, i) => { row[h] = values[i] || ''; });
-        return row;
-      });
-
-      setImportData(rows);
-      setColumnMapping({
-        type: headers.find(h => h.toLowerCase().includes('type')) || '',
-        title: headers.find(h => h.toLowerCase().includes('title')) || '',
-        answer: headers.find(h => h.toLowerCase().includes('answer') || h.toLowerCase().includes('content')) || '',
-        question: headers.find(h => h.toLowerCase().includes('question')) || '',
-      });
-      setIsImportOpen(true);
-    };
-    reader.readAsText(file);
-  };
-
-  const handleImport = async () => {
-    if (!columnMapping.title || !columnMapping.answer) {
-      toast.error('Please map Title and Answer columns');
-      return;
-    }
-
-    setIsSaving(true);
-    const itemsToInsert = importData.map(row => ({
-      company_id: currentCompany!.id,
-      type: row[columnMapping.type] || 'faq',
-      title: row[columnMapping.title],
-      answer: row[columnMapping.answer],
-      question: row[columnMapping.question] || null,
-    })).filter(item => item.title && item.answer);
-
-    const { error } = await supabase.from('knowledge_base_items').insert(itemsToInsert);
-    setIsSaving(false);
-    
-    if (error) toast.error('Failed to import items');
-    else {
-      toast.success(`Imported ${itemsToInsert.length} items`);
-      setIsImportOpen(false);
-      setImportData([]);
-      fetchItems();
-    }
-  };
-
   // CSV Export
   const handleExport = () => {
     const headers = ['type', 'title', 'question', 'answer', 'tags'];
@@ -220,16 +154,7 @@ export default function KnowledgeBase() {
           <p className="text-muted-foreground">FAQs, services, pricing, and policies</p>
         </div>
         <div className="flex gap-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv"
-            onChange={handleFileUpload}
-            className="hidden"
-          />
-          <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
-            <Upload className="h-4 w-4 mr-2" /> Import CSV
-          </Button>
+          <BulkKBImport onImportComplete={fetchItems} />
           <Button variant="outline" onClick={handleExport} disabled={items.length === 0}>
             <Download className="h-4 w-4 mr-2" /> Export CSV
           </Button>
@@ -333,44 +258,6 @@ export default function KnowledgeBase() {
           </div>
         </SheetContent>
       </Sheet>
-
-      {/* Import Dialog */}
-      <Dialog open={isImportOpen} onOpenChange={setIsImportOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Import CSV</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Found {importData.length} rows. Map your CSV columns:
-            </p>
-            {['title', 'answer', 'type', 'question'].map((field) => (
-              <div key={field} className="flex items-center gap-4">
-                <Label className="w-24 capitalize">{field}{field === 'title' || field === 'answer' ? ' *' : ''}</Label>
-                <Select
-                  value={columnMapping[field] || ''}
-                  onValueChange={(v) => setColumnMapping({ ...columnMapping, [field]: v })}
-                >
-                  <SelectTrigger><SelectValue placeholder="Select column" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">-- Skip --</SelectItem>
-                    {importData[0] && Object.keys(importData[0]).map((col) => (
-                      <SelectItem key={col} value={col}>{col}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            ))}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsImportOpen(false)}>Cancel</Button>
-            <Button onClick={handleImport} disabled={isSaving} className="bg-accent hover:bg-accent/90">
-              {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              Import {importData.length} Items
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </motion.div>
   );
 }
