@@ -56,3 +56,6 @@ verify_jwt = false
 
 [functions.accept-trial-invite]
 verify_jwt = false
+
+[functions.twilio-phone-numbers]
+verify_jwt = false

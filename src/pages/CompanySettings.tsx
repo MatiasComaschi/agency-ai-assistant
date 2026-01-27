@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Clock,
   Phone,
   Bot,
   Calendar,
@@ -11,6 +10,8 @@ import {
   Save,
   Loader2,
   Globe,
+  PhoneCall,
+  Trash2,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -18,6 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
 import {
   Select,
   SelectContent,
@@ -29,6 +31,8 @@ import { Separator } from '@/components/ui/separator';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { CompanyHoursEditor } from '@/components/company/CompanyHoursEditor';
+import { PhoneProvisioningDialog } from '@/components/phone/PhoneProvisioningDialog';
+import { useAuth } from '@/contexts/AuthContext';
 
 const timezones = [
   'America/New_York',
@@ -61,11 +65,14 @@ export default function CompanySettings() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const companyId = searchParams.get('id');
+  const { isAgencyAdmin } = useAuth();
   
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isReleasingPhone, setIsReleasingPhone] = useState(false);
   const [company, setCompany] = useState<CompanyData | null>(null);
   const [aiProfile, setAiProfile] = useState<AIProfileData | null>(null);
+  const [showProvisionDialog, setShowProvisionDialog] = useState(false);
   
   // Form state
   const [timezone, setTimezone] = useState('America/New_York');
@@ -170,6 +177,34 @@ export default function CompanySettings() {
     }
   };
 
+  const handleReleasePhone = async () => {
+    if (!companyId || !twilioNumber) return;
+    
+    if (!confirm(`Are you sure you want to release ${twilioNumber}? This action cannot be undone.`)) {
+      return;
+    }
+    
+    setIsReleasingPhone(true);
+    try {
+      const { error } = await supabase.functions.invoke('twilio-phone-numbers', {
+        body: {
+          action: 'release',
+          company_id: companyId,
+        },
+      });
+
+      if (error) throw error;
+
+      setTwilioNumber('');
+      toast.success('Phone number released successfully');
+    } catch (err) {
+      console.error('Release error:', err);
+      toast.error('Failed to release phone number');
+    } finally {
+      setIsReleasingPhone(false);
+    }
+  };
+
   if (!companyId) {
     return (
       <div className="p-12 text-center">
@@ -220,17 +255,53 @@ export default function CompanySettings() {
           <CardDescription>Configure phone numbers for calls and routing</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* AI Phone Number with Provisioning */}
+          <div className="space-y-2">
+            <Label>AI Phone Number (Twilio)</Label>
+            {twilioNumber ? (
+              <div className="flex items-center gap-2">
+                <div className="flex-1 p-3 bg-muted rounded-md flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <PhoneCall className="h-4 w-4 text-accent" />
+                    <span className="font-mono font-medium">{twilioNumber}</span>
+                    <Badge variant="secondary" className="text-xs">Active</Badge>
+                  </div>
+                </div>
+                {isAgencyAdmin && (
+                  <Button
+                    variant="destructive"
+                    size="icon"
+                    onClick={handleReleasePhone}
+                    disabled={isReleasingPhone}
+                    title="Release this phone number"
+                  >
+                    {isReleasingPhone ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <div className="flex-1 p-3 bg-muted/50 border-2 border-dashed rounded-md text-muted-foreground text-sm">
+                  No phone number provisioned
+                </div>
+                {isAgencyAdmin && (
+                  <Button onClick={() => setShowProvisionDialog(true)}>
+                    <PhoneCall className="h-4 w-4 mr-2" />
+                    Provision Number
+                  </Button>
+                )}
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">The number callers dial to reach the AI</p>
+          </div>
+
+          <Separator />
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="twilioNumber">AI Phone Number (Twilio)</Label>
-              <Input
-                id="twilioNumber"
-                value={twilioNumber}
-                onChange={(e) => setTwilioNumber(e.target.value)}
-                placeholder="+1 555 123 4567"
-              />
-              <p className="text-xs text-muted-foreground">The number callers dial to reach the AI</p>
-            </div>
             <div className="space-y-2">
               <Label htmlFor="primaryPhone">Primary Business Phone</Label>
               <Input
@@ -240,19 +311,32 @@ export default function CompanySettings() {
                 placeholder="+1 555 123 4567"
               />
             </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="fallbackPhone">Transfer / Fallback Phone</Label>
-            <Input
-              id="fallbackPhone"
-              value={fallbackPhone}
-              onChange={(e) => setFallbackPhone(e.target.value)}
-              placeholder="+1 555 123 4567"
-            />
-            <p className="text-xs text-muted-foreground">Calls are transferred here when escalated or AI is disabled</p>
+            <div className="space-y-2">
+              <Label htmlFor="fallbackPhone">Transfer / Fallback Phone</Label>
+              <Input
+                id="fallbackPhone"
+                value={fallbackPhone}
+                onChange={(e) => setFallbackPhone(e.target.value)}
+                placeholder="+1 555 123 4567"
+              />
+              <p className="text-xs text-muted-foreground">Calls transferred here when escalated or AI is disabled</p>
+            </div>
           </div>
         </CardContent>
       </Card>
+
+      {/* Phone Provisioning Dialog */}
+      {company && (
+        <PhoneProvisioningDialog
+          open={showProvisionDialog}
+          onOpenChange={setShowProvisionDialog}
+          companyId={companyId!}
+          companyName={company.name}
+          onSuccess={() => {
+            fetchData();
+          }}
+        />
+      )}
 
       {/* AI Settings */}
       <Card>
