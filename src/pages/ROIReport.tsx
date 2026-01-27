@@ -4,6 +4,7 @@ import { Download, FileText, TrendingUp, Phone, Calendar, DollarSign } from 'luc
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useCompany } from '@/contexts/CompanyContext';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -14,6 +15,7 @@ import {
   ChartTooltipContent,
 } from '@/components/ui/chart';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, LineChart, Line, CartesianGrid, Legend } from 'recharts';
+import { ROICalculator } from '@/components/analytics/ROICalculator';
 
 interface WeeklyData {
   week: string;
@@ -315,7 +317,13 @@ export default function ROIReport() {
         </div>
       </div>
 
-      {/* Key Metrics */}
+      <Tabs defaultValue="analytics" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="analytics">Analytics</TabsTrigger>
+          <TabsTrigger value="calculator">ROI Calculator</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="analytics" className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="pb-2">
@@ -447,6 +455,12 @@ export default function ROIReport() {
           </CardContent>
         </Card>
       </div>
+        </TabsContent>
+
+        <TabsContent value="calculator">
+          <ROICalculator />
+        </TabsContent>
+      </Tabs>
     </motion.div>
   );
 }
