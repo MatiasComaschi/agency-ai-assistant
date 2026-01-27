@@ -27,6 +27,10 @@ import Referrals from "@/pages/Referrals";
 import Testimonials from "@/pages/Testimonials";
 import WhiteLabel from "@/pages/WhiteLabel";
 import AdminSettings from "@/pages/AdminSettings";
+import PlatformSettings from "@/pages/PlatformSettings";
+import Services from "@/pages/Services";
+import StaffPage from "@/pages/Staff";
+import Appointments from "@/pages/Appointments";
 
 const queryClient = new QueryClient();
 
@@ -40,17 +44,21 @@ const App = () => (
           <Routes>
             <Route path="/auth" element={<Auth />} />
             <Route path="/" element={<AppLayout />}>
-            <Route index element={<Navigate to="/agency" replace />} />
+              <Route index element={<Navigate to="/agency" replace />} />
               <Route path="agency" element={<AgencyDashboard />} />
               <Route path="agency/create-company" element={<CreateCompany />} />
               <Route path="agency/templates" element={<IndustryTemplates />} />
               <Route path="agency/bulk-import" element={<BulkImport />} />
               <Route path="agency/support" element={<SupportConsole />} />
               <Route path="agency/audit-log" element={<AuditLog />} />
+              <Route path="agency/platform" element={<PlatformSettings />} />
               <Route path="agency/admin-settings" element={<AdminSettings />} />
               <Route path="company" element={<CompanyOverview />} />
               <Route path="ai-receptionist" element={<AIReceptionist />} />
               <Route path="knowledge-base" element={<KnowledgeBase />} />
+              <Route path="services" element={<Services />} />
+              <Route path="staff" element={<StaffPage />} />
+              <Route path="appointments" element={<Appointments />} />
               <Route path="calls" element={<CallLogs />} />
               <Route path="team" element={<Team />} />
               <Route path="integrations" element={<Integrations />} />
