@@ -15,6 +15,8 @@ import {
   Loader2,
   Settings,
   Phone,
+  Bot,
+  BotOff,
 } from 'lucide-react';
 import { DebugIdsDialog } from '@/components/debug/DebugIdsDialog';
 import { useAuth } from '@/contexts/AuthContext';
@@ -130,6 +132,21 @@ export default function AgencyDashboard() {
       toast.error('Failed to update company status');
     } else {
       toast.success(`Company ${newStatus === 'paused' ? 'paused' : 'activated'}`);
+      refetchCompanies();
+    }
+  };
+
+  const handleAiToggle = async (company: Company) => {
+    const newState = !company.ai_enabled;
+    const { error } = await supabase
+      .from('companies')
+      .update({ ai_enabled: newState })
+      .eq('id', company.id);
+
+    if (error) {
+      toast.error('Failed to toggle AI');
+    } else {
+      toast.success(newState ? 'AI enabled' : 'AI disabled (calls will forward)');
       refetchCompanies();
     }
   };
@@ -405,12 +422,25 @@ export default function AgencyDashboard() {
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => {
                             setCurrentCompanyId(company.id);
-                            navigate('/calls');
+                            navigate('/company?tab=calls');
                           }}>
                             <Phone className="h-4 w-4 mr-2" />
                             View Calls
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={() => handleAiToggle(company)}>
+                            {company.ai_enabled ? (
+                              <>
+                                <BotOff className="h-4 w-4 mr-2" />
+                                Disable AI (Panic)
+                              </>
+                            ) : (
+                              <>
+                                <Bot className="h-4 w-4 mr-2" />
+                                Enable AI
+                              </>
+                            )}
+                          </DropdownMenuItem>
                           {company.status === 'active' ? (
                             <DropdownMenuItem
                               onClick={() => handleStatusChange(company, 'paused')}

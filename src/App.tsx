@@ -10,10 +10,6 @@ import AgencyDashboard from "@/pages/AgencyDashboard";
 import CreateCompany from "@/pages/CreateCompany";
 import CompanyOverview from "@/pages/CompanyOverview";
 import CompanySettings from "@/pages/CompanySettings";
-import AIReceptionist from "@/pages/AIReceptionist";
-import KnowledgeBase from "@/pages/KnowledgeBase";
-import CallLogs from "@/pages/CallLogs";
-import Team from "@/pages/Team";
 import Integrations from "@/pages/Integrations";
 import Billing from "@/pages/Billing";
 import Settings from "@/pages/Settings";
@@ -21,17 +17,7 @@ import NotFound from "@/pages/NotFound";
 import IndustryTemplates from "@/pages/IndustryTemplates";
 import BulkImport from "@/pages/BulkImport";
 import SupportConsole from "@/pages/SupportConsole";
-import AuditLog from "@/pages/AuditLog";
-import Monitoring from "@/pages/Monitoring";
-import ROIReport from "@/pages/ROIReport";
-import Referrals from "@/pages/Referrals";
-import Testimonials from "@/pages/Testimonials";
-import WhiteLabel from "@/pages/WhiteLabel";
-import AdminSettings from "@/pages/AdminSettings";
 import PlatformSettings from "@/pages/PlatformSettings";
-import Services from "@/pages/Services";
-import StaffPage from "@/pages/Staff";
-import Appointments from "@/pages/Appointments";
 
 const queryClient = new QueryClient();
 
@@ -52,24 +38,21 @@ const App = () => (
               <Route path="agency/templates" element={<IndustryTemplates />} />
               <Route path="agency/bulk-import" element={<BulkImport />} />
               <Route path="agency/support" element={<SupportConsole />} />
-              <Route path="agency/audit-log" element={<AuditLog />} />
               <Route path="agency/platform" element={<PlatformSettings />} />
-              <Route path="agency/admin-settings" element={<AdminSettings />} />
               <Route path="company" element={<CompanyOverview />} />
-              <Route path="ai-receptionist" element={<AIReceptionist />} />
-              <Route path="knowledge-base" element={<KnowledgeBase />} />
-              <Route path="services" element={<Services />} />
-              <Route path="staff" element={<StaffPage />} />
-              <Route path="appointments" element={<Appointments />} />
-              <Route path="calls" element={<CallLogs />} />
-              <Route path="team" element={<Team />} />
+              
+              {/* Legacy routes - redirect to Company Overview with tab */}
+              <Route path="ai-receptionist" element={<Navigate to="/company?tab=ai" replace />} />
+              <Route path="knowledge-base" element={<Navigate to="/company?tab=kb" replace />} />
+              <Route path="services" element={<Navigate to="/company?tab=services" replace />} />
+              <Route path="staff" element={<Navigate to="/company?tab=staff" replace />} />
+              <Route path="appointments" element={<Navigate to="/company?tab=appointments" replace />} />
+              <Route path="calls" element={<Navigate to="/company?tab=calls" replace />} />
+              <Route path="team" element={<Navigate to="/company?tab=team" replace />} />
+              
+              {/* Keep standalone pages */}
               <Route path="integrations" element={<Integrations />} />
               <Route path="billing" element={<Billing />} />
-              <Route path="monitoring" element={<Monitoring />} />
-              <Route path="roi-report" element={<ROIReport />} />
-              <Route path="referrals" element={<Referrals />} />
-              <Route path="testimonials" element={<Testimonials />} />
-              <Route path="white-label" element={<WhiteLabel />} />
               <Route path="settings" element={<Settings />} />
             </Route>
             <Route path="*" element={<NotFound />} />
