@@ -9,7 +9,7 @@ const corsHeaders = {
 interface AvailabilitySlot {
   start_datetime: string;
   end_datetime: string;
-  staff_id?: string;
+  staff_id: string;
 }
 
 interface StaffHours {
@@ -32,6 +32,90 @@ interface Appointment {
   status: string;
 }
 
+interface Company {
+  id: string;
+  timezone: string;
+}
+
+/**
+ * Convert a Date to a local date string (YYYY-MM-DD) in the given timezone.
+ */
+function toLocalDateString(date: Date, timezone: string): string {
+  return date.toLocaleDateString("en-CA", { timeZone: timezone }); // en-CA gives YYYY-MM-DD
+}
+
+/**
+ * Get the day of week (0-6, Sunday=0) for a date in the given timezone.
+ */
+function getLocalDayOfWeek(date: Date, timezone: string): number {
+  const localDateStr = date.toLocaleDateString("en-US", { timeZone: timezone, weekday: "short" });
+  const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return dayMap[localDateStr.slice(0, 3)] ?? 0;
+}
+
+/**
+ * Parse a local time string (HH:MM or HH:MM:SS) and a date string (YYYY-MM-DD) 
+ * into a Date object representing that local time in the given timezone.
+ */
+function parseLocalDateTime(dateStr: string, timeStr: string, timezone: string): Date {
+  // Create a datetime string and parse it as if it's in the target timezone
+  const datetimeStr = `${dateStr}T${timeStr}`;
+  
+  // Use Intl.DateTimeFormat to get the UTC offset for this timezone at this date
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  
+  // Parse the datetime string as local time
+  const [year, month, day] = dateStr.split("-").map(Number);
+  const timeParts = timeStr.split(":").map(Number);
+  const hour = timeParts[0] || 0;
+  const minute = timeParts[1] || 0;
+  const second = timeParts[2] || 0;
+  
+  // Create a date in the timezone by finding the UTC equivalent
+  // This is approximate but works for slot generation
+  const localDate = new Date(year, month - 1, day, hour, minute, second);
+  
+  // Get the offset difference
+  const utcDate = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  const tzOffset = getTimezoneOffsetMinutes(utcDate, timezone);
+  
+  return new Date(utcDate.getTime() + tzOffset * 60 * 1000);
+}
+
+/**
+ * Get timezone offset in minutes (positive = behind UTC, negative = ahead)
+ */
+function getTimezoneOffsetMinutes(date: Date, timezone: string): number {
+  const utcDate = new Date(date.toLocaleString("en-US", { timeZone: "UTC" }));
+  const tzDate = new Date(date.toLocaleString("en-US", { timeZone: timezone }));
+  return (utcDate.getTime() - tzDate.getTime()) / 60000;
+}
+
+/**
+ * Validate UUID format
+ */
+function isValidUUID(str: string): boolean {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(str);
+}
+
+/**
+ * Validate ISO datetime string
+ */
+function isValidISODate(str: string): boolean {
+  const date = new Date(str);
+  return !isNaN(date.getTime());
+}
+
 Deno.serve(async (req) => {
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
@@ -52,16 +136,90 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // Parse request body
-    const { company_id, service_id, staff_id, start_range, end_range } = await req.json();
+    let body: Record<string, unknown>;
+    try {
+      body = await req.json();
+    } catch {
+      return new Response(
+        JSON.stringify({ error: "Invalid JSON body" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
+    const { company_id, service_id, staff_id, start_range, end_range } = body as {
+      company_id?: string;
+      service_id?: string;
+      staff_id?: string;
+      start_range?: string;
+      end_range?: string;
+    };
+
+    // Input validation
     if (!company_id || !service_id || !start_range || !end_range) {
       return new Response(
-        JSON.stringify({ error: "Missing required parameters: company_id, service_id, start_range, end_range" }),
+        JSON.stringify({ 
+          error: "Missing required parameters", 
+          details: "Required: company_id, service_id, start_range, end_range" 
+        }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (!isValidUUID(company_id)) {
+      return new Response(
+        JSON.stringify({ error: "Invalid company_id format (must be UUID)" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (!isValidUUID(service_id)) {
+      return new Response(
+        JSON.stringify({ error: "Invalid service_id format (must be UUID)" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (staff_id && !isValidUUID(staff_id)) {
+      return new Response(
+        JSON.stringify({ error: "Invalid staff_id format (must be UUID)" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (!isValidISODate(start_range)) {
+      return new Response(
+        JSON.stringify({ error: "Invalid start_range format (must be ISO datetime)" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (!isValidISODate(end_range)) {
+      return new Response(
+        JSON.stringify({ error: "Invalid end_range format (must be ISO datetime)" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     console.log("[compute-availability] Request:", { company_id, service_id, staff_id, start_range, end_range });
+
+    // Fetch company to get timezone
+    const { data: companyData, error: companyError } = await supabase
+      .from("companies")
+      .select("id, timezone")
+      .eq("id", company_id)
+      .single();
+
+    if (companyError || !companyData) {
+      console.error("[compute-availability] Company not found:", companyError);
+      return new Response(
+        JSON.stringify({ error: "Company not found" }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const company = companyData as Company;
+    const timezone = company.timezone || "America/New_York";
+    console.log("[compute-availability] Using timezone:", timezone);
 
     // Fetch service to get duration
     const { data: service, error: serviceError } = await supabase
@@ -80,14 +238,13 @@ Deno.serve(async (req) => {
     }
 
     const durationMinutes = service.duration_minutes;
+    const slotInterval = 15; // Generate slots every 15 minutes
 
     // Get staff who can perform this service
-    let staffQuery = supabase
+    const { data: serviceStaff, error: serviceStaffError } = await supabase
       .from("service_staff")
       .select("staff_id")
       .eq("service_id", service_id);
-
-    const { data: serviceStaff, error: serviceStaffError } = await staffQuery;
 
     if (serviceStaffError) {
       console.error("[compute-availability] Error fetching service_staff:", serviceStaffError);
@@ -102,7 +259,6 @@ Deno.serve(async (req) => {
     
     if (staff_id) {
       if (!eligibleStaffIds.includes(staff_id)) {
-        // Check if staff is active and can do this service
         return new Response(
           JSON.stringify({ slots: [], message: "Specified staff cannot perform this service" }),
           { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -174,7 +330,7 @@ Deno.serve(async (req) => {
 
     const timeOffs: StaffTimeOff[] = (timeOffData || []) as StaffTimeOff[];
 
-    // Fetch existing confirmed appointments in range
+    // Fetch existing confirmed appointments in range for this company
     const { data: appointmentsData, error: appointmentsError } = await supabase
       .from("appointments")
       .select("staff_id, start_datetime, end_datetime, status")
@@ -195,7 +351,6 @@ Deno.serve(async (req) => {
 
     // Generate slots
     const slots: AvailabilitySlot[] = [];
-    const slotInterval = 30; // Generate slots every 30 minutes
 
     const startDate = new Date(start_range);
     const endDate = new Date(end_range);
@@ -203,11 +358,17 @@ Deno.serve(async (req) => {
 
     // Iterate through each day in the range
     const currentDate = new Date(startDate);
-    currentDate.setHours(0, 0, 0, 0);
+    
+    // Set to start of day in UTC
+    currentDate.setUTCHours(0, 0, 0, 0);
 
-    while (currentDate <= endDate) {
-      const dayOfWeek = currentDate.getDay();
-      const dateStr = currentDate.toISOString().split("T")[0];
+    const maxDays = 90; // Safety limit
+    let daysProcessed = 0;
+
+    while (currentDate <= endDate && daysProcessed < maxDays) {
+      // Get the local date string for this day in company timezone
+      const localDateStr = toLocalDateString(currentDate, timezone);
+      const dayOfWeek = getLocalDayOfWeek(currentDate, timezone);
 
       // For each eligible staff member
       for (const staffId of eligibleStaffIds) {
@@ -220,15 +381,9 @@ Deno.serve(async (req) => {
           continue; // Staff doesn't work this day
         }
 
-        // Parse start and end times
-        const [startHour, startMin] = hoursForDay.start_time.split(":").map(Number);
-        const [endHour, endMin] = hoursForDay.end_time.split(":").map(Number);
-
-        const dayStart = new Date(currentDate);
-        dayStart.setHours(startHour, startMin, 0, 0);
-
-        const dayEnd = new Date(currentDate);
-        dayEnd.setHours(endHour, endMin, 0, 0);
+        // Parse start and end times in company timezone
+        const dayStart = parseLocalDateTime(localDateStr, hoursForDay.start_time, timezone);
+        const dayEnd = parseLocalDateTime(localDateStr, hoursForDay.end_time, timezone);
 
         // Generate slots within working hours
         let slotStart = new Date(dayStart);
@@ -239,8 +394,8 @@ Deno.serve(async (req) => {
           // Skip if slot end exceeds working hours
           if (slotEnd > dayEnd) break;
 
-          // Skip if slot is in the past
-          if (slotStart < now) {
+          // Skip if slot is in the past (with 5 minute buffer)
+          if (slotStart.getTime() < now.getTime() + 5 * 60 * 1000) {
             slotStart = new Date(slotStart.getTime() + slotInterval * 60 * 1000);
             continue;
           }
@@ -290,15 +445,25 @@ Deno.serve(async (req) => {
 
       // Move to next day
       currentDate.setDate(currentDate.getDate() + 1);
+      daysProcessed++;
     }
 
-    // Sort slots by datetime
-    slots.sort((a, b) => new Date(a.start_datetime).getTime() - new Date(b.start_datetime).getTime());
+    // Sort slots by datetime, then by staff_id for consistency
+    slots.sort((a, b) => {
+      const timeDiff = new Date(a.start_datetime).getTime() - new Date(b.start_datetime).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return a.staff_id.localeCompare(b.staff_id);
+    });
 
-    console.log("[compute-availability] Found", slots.length, "slots");
+    console.log("[compute-availability] Found", slots.length, "slots for", eligibleStaffIds.length, "staff members");
 
     return new Response(
-      JSON.stringify({ slots }),
+      JSON.stringify({ 
+        slots,
+        timezone,
+        staff_count: eligibleStaffIds.length,
+        duration_minutes: durationMinutes
+      }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
