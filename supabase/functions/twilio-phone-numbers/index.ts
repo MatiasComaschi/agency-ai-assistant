@@ -115,9 +115,19 @@ const provisionNumber = async (
   );
   
   if (!response.ok) {
-    const error = await response.text();
-    console.error("[twilio-phone] Provision error:", error);
-    throw new Error(`Failed to provision number: ${response.status}`);
+    const errorText = await response.text();
+    console.error("[twilio-phone] Provision error:", errorText);
+    
+    // Parse Twilio error for user-friendly message
+    try {
+      const errorJson = JSON.parse(errorText);
+      throw new Error(errorJson.message || `Failed to provision number: ${response.status}`);
+    } catch (parseError) {
+      if (parseError instanceof SyntaxError) {
+        throw new Error(`Failed to provision number: ${response.status}`);
+      }
+      throw parseError;
+    }
   }
   
   const data = await response.json();
