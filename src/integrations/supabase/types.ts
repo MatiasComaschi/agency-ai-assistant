@@ -70,6 +70,76 @@ export type Database = {
           },
         ]
       }
+      appointments: {
+        Row: {
+          company_id: string
+          created_at: string
+          customer_name: string
+          customer_phone: string
+          end_datetime: string
+          external_event_id: string | null
+          id: string
+          notes: string | null
+          service_id: string
+          source: string
+          staff_id: string | null
+          start_datetime: string
+          status: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          customer_name: string
+          customer_phone: string
+          end_datetime: string
+          external_event_id?: string | null
+          id?: string
+          notes?: string | null
+          service_id: string
+          source?: string
+          staff_id?: string | null
+          start_datetime: string
+          status?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          customer_name?: string
+          customer_phone?: string
+          end_datetime?: string
+          external_event_id?: string | null
+          id?: string
+          notes?: string | null
+          service_id?: string
+          source?: string
+          staff_id?: string | null
+          start_datetime?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "appointments_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "appointments_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "appointments_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       audits: {
         Row: {
           action: string
@@ -106,6 +176,50 @@ export type Database = {
             foreignKeyName: "audits_company_id_fkey"
             columns: ["company_id"]
             isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      calendar_connections: {
+        Row: {
+          company_id: string
+          config_json: Json | null
+          connected_at: string | null
+          created_at: string
+          id: string
+          last_sync_at: string | null
+          provider: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          config_json?: Json | null
+          connected_at?: string | null
+          created_at?: string
+          id?: string
+          last_sync_at?: string | null
+          provider: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          config_json?: Json | null
+          connected_at?: string | null
+          created_at?: string
+          id?: string
+          last_sync_at?: string | null
+          provider?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "calendar_connections_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
             referencedRelation: "companies"
             referencedColumns: ["id"]
           },
@@ -519,6 +633,27 @@ export type Database = {
           },
         ]
       }
+      platform_settings: {
+        Row: {
+          core_prompt: string
+          core_prompt_version: string
+          id: number
+          updated_at: string
+        }
+        Insert: {
+          core_prompt?: string
+          core_prompt_version?: string
+          id?: number
+          updated_at?: string
+        }
+        Update: {
+          core_prompt?: string
+          core_prompt_version?: string
+          id?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -617,6 +752,185 @@ export type Database = {
             columns: ["referred_company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      service_staff: {
+        Row: {
+          service_id: string
+          staff_id: string
+        }
+        Insert: {
+          service_id: string
+          staff_id: string
+        }
+        Update: {
+          service_id?: string
+          staff_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_staff_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_staff_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      services: {
+        Row: {
+          company_id: string
+          created_at: string
+          description: string | null
+          duration_minutes: number
+          id: string
+          is_active: boolean
+          name: string
+          price: number | null
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          description?: string | null
+          duration_minutes?: number
+          id?: string
+          is_active?: boolean
+          name: string
+          price?: number | null
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          description?: string | null
+          duration_minutes?: number
+          id?: string
+          is_active?: boolean
+          name?: string
+          price?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "services_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      staff: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          is_active: boolean
+          name: string
+          role: string | null
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name: string
+          role?: string | null
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          role?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      staff_hours: {
+        Row: {
+          day_of_week: number
+          end_time: string
+          id: string
+          staff_id: string
+          start_time: string
+        }
+        Insert: {
+          day_of_week: number
+          end_time?: string
+          id?: string
+          staff_id: string
+          start_time?: string
+        }
+        Update: {
+          day_of_week?: number
+          end_time?: string
+          id?: string
+          staff_id?: string
+          start_time?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_hours_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      staff_time_off: {
+        Row: {
+          created_at: string
+          end_datetime: string
+          id: string
+          reason: string | null
+          staff_id: string
+          start_datetime: string
+        }
+        Insert: {
+          created_at?: string
+          end_datetime: string
+          id?: string
+          reason?: string | null
+          staff_id: string
+          start_datetime: string
+        }
+        Update: {
+          created_at?: string
+          end_datetime?: string
+          id?: string
+          reason?: string | null
+          staff_id?: string
+          start_datetime?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_time_off_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
             referencedColumns: ["id"]
           },
         ]

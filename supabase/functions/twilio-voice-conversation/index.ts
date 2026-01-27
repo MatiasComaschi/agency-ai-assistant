@@ -1340,6 +1340,15 @@ Deno.serve(async (req) => {
 
     if (speechResult && lovableApiKey) {
       try {
+        // Fetch core prompt from platform_settings (dev-locked global rules)
+        const { data: platformSettings } = await supabase
+          .from("platform_settings")
+          .select("core_prompt")
+          .eq("id", 1)
+          .maybeSingle();
+
+        const corePrompt = platformSettings?.core_prompt || "";
+
         const { data: kbItems } = await supabase
           .from("knowledge_base_items")
           .select("*")
@@ -1367,11 +1376,18 @@ Deno.serve(async (req) => {
 - Offer to take a message or create a callback request if they need to speak to someone.`
           : "";
 
-        const systemPrompt = `You are a friendly phone receptionist for ${company?.name || "the company"}.
+        // Assemble final prompt: CORE PROMPT (locked) + Company Prompt + KB
+        const companyPrompt = aiProfile?.system_prompt || "Be helpful and warm.";
+        
+        const systemPrompt = `${corePrompt}
 
-${aiProfile?.system_prompt || "Be helpful and warm."}
+---
 
-RULES:
+You are a friendly phone receptionist for ${company?.name || "the company"}.
+
+${companyPrompt}
+
+ADDITIONAL RULES:
 1. Keep responses to 1-2 sentences max
 2. Sound natural, not robotic
 3. If you don't know something, offer to transfer to a team member (or take a message if after hours)
