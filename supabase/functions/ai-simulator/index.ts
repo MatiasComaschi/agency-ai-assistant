@@ -1,10 +1,19 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.0";
 import { formatCompanyHoursForAI } from "../_shared/format-hours.ts";
+import { validateUuid, sanitizeString } from "../_shared/input-validator.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+// Input validation constants
+const MAX_USER_MESSAGE_LENGTH = 10000;
+const MAX_CONVERSATION_HISTORY_LENGTH = 50;
+const MAX_CALLER_NAME_LENGTH = 200;
+const MAX_CALLER_PHONE_LENGTH = 30;
+const VALID_MODES = ["faq", "booking", "quote", "complaint"] as const;
 
 interface SimulatorRequest {
   companyId: string;
@@ -21,8 +30,94 @@ serve(async (req) => {
   }
 
   try {
-    const { companyId, mode, callerName, callerPhone, userMessage, conversationHistory } = 
-      await req.json() as SimulatorRequest;
+    const body = await req.json();
+    
+    // Validate required fields exist
+    if (!body || typeof body !== "object") {
+      return new Response(
+        JSON.stringify({ error: "Invalid request body" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validate companyId is a valid UUID
+    if (!body.companyId || !validateUuid(body.companyId)) {
+      return new Response(
+        JSON.stringify({ error: "Invalid or missing companyId" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validate mode
+    if (!body.mode || !VALID_MODES.includes(body.mode)) {
+      return new Response(
+        JSON.stringify({ error: "Invalid mode. Must be one of: faq, booking, quote, complaint" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validate userMessage length
+    if (!body.userMessage || typeof body.userMessage !== "string") {
+      return new Response(
+        JSON.stringify({ error: "userMessage is required and must be a string" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (body.userMessage.length > MAX_USER_MESSAGE_LENGTH) {
+      return new Response(
+        JSON.stringify({ error: `userMessage exceeds maximum length of ${MAX_USER_MESSAGE_LENGTH} characters` }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validate conversation history
+    if (!Array.isArray(body.conversationHistory)) {
+      return new Response(
+        JSON.stringify({ error: "conversationHistory must be an array" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (body.conversationHistory.length > MAX_CONVERSATION_HISTORY_LENGTH) {
+      return new Response(
+        JSON.stringify({ error: `conversationHistory exceeds maximum of ${MAX_CONVERSATION_HISTORY_LENGTH} entries` }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validate each conversation entry
+    for (const entry of body.conversationHistory) {
+      if (!entry || typeof entry !== "object") {
+        return new Response(
+          JSON.stringify({ error: "Invalid conversation history entry" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      if (!["user", "assistant"].includes(entry.role)) {
+        return new Response(
+          JSON.stringify({ error: "Conversation entry role must be 'user' or 'assistant'" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      if (typeof entry.content !== "string" || entry.content.length > MAX_USER_MESSAGE_LENGTH) {
+        return new Response(
+          JSON.stringify({ error: `Conversation entry content must be a string under ${MAX_USER_MESSAGE_LENGTH} characters` }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
+    // Sanitize inputs
+    const companyId = body.companyId;
+    const mode = body.mode as SimulatorRequest["mode"];
+    const callerName = sanitizeString(body.callerName || "", MAX_CALLER_NAME_LENGTH);
+    const callerPhone = sanitizeString(body.callerPhone || "", MAX_CALLER_PHONE_LENGTH);
+    const userMessage = sanitizeString(body.userMessage, MAX_USER_MESSAGE_LENGTH);
+    const conversationHistory = body.conversationHistory.map((entry: { role: string; content: string }) => ({
+      role: entry.role as "user" | "assistant",
+      content: sanitizeString(entry.content, MAX_USER_MESSAGE_LENGTH),
+    }));
 
     console.log("AI Simulator request:", { companyId, mode, callerName, callerPhone });
 

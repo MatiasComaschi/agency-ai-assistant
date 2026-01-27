@@ -1,9 +1,17 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.2";
+import { validateUuid, sanitizeString } from "../_shared/input-validator.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+// Valid actions and providers for input validation
+const VALID_ACTIONS = ["connect", "disconnect", "test", "sync"] as const;
+const VALID_PROVIDERS = ["twilio", "calendly", "square", "fresha", "google_calendar", "stripe"] as const;
+const MAX_CREDENTIAL_KEY_LENGTH = 100;
+const MAX_CREDENTIAL_VALUE_LENGTH = 500;
+const MAX_CREDENTIALS_COUNT = 10;
 
 interface IntegrationRequest {
   action: "connect" | "disconnect" | "test" | "sync";
@@ -11,6 +19,50 @@ interface IntegrationRequest {
   provider: string;
   credentials?: Record<string, string>;
 }
+
+// Validate and sanitize credentials object
+const validateCredentials = (
+  credentials: unknown
+): { valid: boolean; sanitized: Record<string, string>; error?: string } => {
+  if (!credentials || typeof credentials !== "object") {
+    return { valid: false, sanitized: {}, error: "Credentials must be an object" };
+  }
+
+  const credObj = credentials as Record<string, unknown>;
+  const keys = Object.keys(credObj);
+
+  if (keys.length > MAX_CREDENTIALS_COUNT) {
+    return { valid: false, sanitized: {}, error: `Too many credential fields (max ${MAX_CREDENTIALS_COUNT})` };
+  }
+
+  const sanitized: Record<string, string> = {};
+
+  for (const key of keys) {
+    // Validate key
+    if (typeof key !== "string" || key.length > MAX_CREDENTIAL_KEY_LENGTH) {
+      return { valid: false, sanitized: {}, error: `Invalid credential key: ${key}` };
+    }
+
+    // Only allow alphanumeric keys with underscores
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) {
+      return { valid: false, sanitized: {}, error: `Invalid credential key format: ${key}` };
+    }
+
+    const value = credObj[key];
+    if (typeof value !== "string") {
+      return { valid: false, sanitized: {}, error: `Credential value for '${key}' must be a string` };
+    }
+
+    if (value.length > MAX_CREDENTIAL_VALUE_LENGTH) {
+      return { valid: false, sanitized: {}, error: `Credential value for '${key}' exceeds maximum length` };
+    }
+
+    // Sanitize the value
+    sanitized[key] = sanitizeString(value, MAX_CREDENTIAL_VALUE_LENGTH);
+  }
+
+  return { valid: true, sanitized };
+};
 
 // Provider test functions - simulate API validation
 const testProviderConnection = async (
@@ -98,13 +150,46 @@ Deno.serve(async (req) => {
       );
     }
 
-    const body: IntegrationRequest = await req.json();
+    let body: IntegrationRequest;
+    try {
+      body = await req.json();
+    } catch {
+      return new Response(
+        JSON.stringify({ error: "Invalid JSON body" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const { action, company_id, provider, credentials } = body;
 
     // Validate required fields
     if (!action || !company_id || !provider) {
       return new Response(
         JSON.stringify({ error: "Missing required fields: action, company_id, provider" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validate action is one of allowed values
+    if (!VALID_ACTIONS.includes(action as typeof VALID_ACTIONS[number])) {
+      return new Response(
+        JSON.stringify({ error: `Invalid action. Must be one of: ${VALID_ACTIONS.join(", ")}` }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validate company_id is a valid UUID
+    if (!validateUuid(company_id)) {
+      return new Response(
+        JSON.stringify({ error: "Invalid company_id format" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validate provider is one of allowed values
+    if (!VALID_PROVIDERS.includes(provider as typeof VALID_PROVIDERS[number])) {
+      return new Response(
+        JSON.stringify({ error: `Invalid provider. Must be one of: ${VALID_PROVIDERS.join(", ")}` }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -138,8 +223,18 @@ Deno.serve(async (req) => {
           );
         }
 
+        // Validate and sanitize credentials
+        const credValidation = validateCredentials(credentials);
+        if (!credValidation.valid) {
+          return new Response(
+            JSON.stringify({ error: credValidation.error }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        const sanitizedCredentials = credValidation.sanitized;
+
         // Test connection first
-        const testResult = await testProviderConnection(provider, credentials);
+        const testResult = await testProviderConnection(provider, sanitizedCredentials);
         if (!testResult.success) {
           return new Response(
             JSON.stringify({ error: testResult.message }),
@@ -158,7 +253,7 @@ Deno.serve(async (req) => {
               // Store masked version for display, full creds are server-side only
               credentials_stored: true,
               ...Object.fromEntries(
-                Object.entries(credentials).map(([k, v]) => [
+                Object.entries(sanitizedCredentials).map(([k, v]) => [
                   k,
                   v.length > 8 ? `${v.slice(0, 4)}...${v.slice(-4)}` : "****"
                 ])
