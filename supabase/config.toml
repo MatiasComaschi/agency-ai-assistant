@@ -65,3 +65,6 @@ verify_jwt = false
 
 [functions.report-usage-to-stripe]
 verify_jwt = false
+
+[functions.billing-cron]
+verify_jwt = false
