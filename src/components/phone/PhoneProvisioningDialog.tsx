@@ -3,7 +3,6 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Phone, Search, Loader2, Check, AlertCircle } from 'lucide-react';
@@ -184,10 +183,10 @@ export function PhoneProvisioningDialog({
                       <div className="flex items-center gap-2">
                         <div className="flex gap-1">
                           {num.capabilities.voice && (
-                            <Badge variant="secondary" className="text-xs">Voice</Badge>
+                            <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold bg-secondary text-secondary-foreground">Voice</span>
                           )}
                           {num.capabilities.sms && (
-                            <Badge variant="secondary" className="text-xs">SMS</Badge>
+                            <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold bg-secondary text-secondary-foreground">SMS</span>
                           )}
                         </div>
                         {selectedNumber === num.phoneNumber && (
