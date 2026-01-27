@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { useState, useEffect } from 'react';
-import { AlertTriangle, Phone, Shield, Bell, User, Save } from 'lucide-react';
+import { AlertTriangle, Phone, Shield, Bell, User, Save, Clock } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,6 +12,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { CompanyHoursEditor } from '@/components/company/CompanyHoursEditor';
 
 interface AISettings {
   ai_enabled: boolean;
@@ -259,6 +260,11 @@ export default function Settings() {
             )}
           </CardContent>
         </Card>
+      )}
+
+      {/* Business Hours */}
+      {currentCompany && (
+        <CompanyHoursEditor companyId={currentCompany.id} />
       )}
 
       <Separator />

@@ -24,6 +24,7 @@ function parseCompany(data: Record<string, unknown>): Company {
     fallback_phone: data.fallback_phone as string | null,
     booking_link: data.booking_link as string | null,
     twilio_number: data.twilio_number as string | null,
+    ai_enabled: data.ai_enabled !== false,
     created_at: data.created_at as string,
     updated_at: data.updated_at as string,
   };
