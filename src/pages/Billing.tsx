@@ -7,10 +7,12 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Separator } from "@/components/ui/separator";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSubscription } from "@/hooks/useSubscription";
 import { PLANS, PlanKey, formatCurrency, calculateOverage, OVERAGE_RATE_CENTS } from "@/lib/billing";
+import { TrialInviteSection } from "@/components/billing/TrialInviteSection";
 import { toast } from "sonner";
 import { useSearchParams } from "react-router-dom";
 
@@ -412,6 +414,10 @@ export default function Billing() {
           )}
         </CardContent>
       </Card>
+
+      {/* Trial Invites Section - Agency Admin Only */}
+      <Separator className="my-8" />
+      <TrialInviteSection />
     </motion.div>
   );
 }
