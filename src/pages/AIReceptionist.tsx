@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Save, MessageSquare, Bot, Settings, Clock, Loader2, Play, RotateCcw } from 'lucide-react';
+import { Save, MessageSquare, Bot, Settings, Clock, Loader2, Play, RotateCcw, Globe } from 'lucide-react';
 import { useCompany } from '@/contexts/CompanyContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,10 +9,79 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import type { Json } from '@/integrations/supabase/types';
 import type { AIProfile, AllowedActions } from '@/types';
 import { AISimulator } from '@/components/ai-simulator/AISimulator';
+
+// Supported languages with localized scripts
+const LANGUAGES = [
+  { code: 'en-US', name: 'English (US)', flag: '🇺🇸' },
+  { code: 'es-ES', name: 'Spanish (Spain)', flag: '🇪🇸' },
+  { code: 'es-MX', name: 'Spanish (Mexico)', flag: '🇲🇽' },
+  { code: 'fr-FR', name: 'French', flag: '🇫🇷' },
+  { code: 'de-DE', name: 'German', flag: '🇩🇪' },
+  { code: 'pt-BR', name: 'Portuguese (Brazil)', flag: '🇧🇷' },
+  { code: 'zh-CN', name: 'Chinese (Mandarin)', flag: '🇨🇳' },
+  { code: 'ja-JP', name: 'Japanese', flag: '🇯🇵' },
+  { code: 'ko-KR', name: 'Korean', flag: '🇰🇷' },
+  { code: 'vi-VN', name: 'Vietnamese', flag: '🇻🇳' },
+] as const;
+
+// Localized default scripts
+const LOCALIZED_SCRIPTS: Record<string, { greeting: string; disclosure: string; afterHours: string }> = {
+  'en-US': {
+    greeting: "Hello! Thank you for calling. How may I help you today?",
+    disclosure: "Please note that you are speaking with an AI assistant.",
+    afterHours: "We are currently closed. Please leave a message and we'll get back to you.",
+  },
+  'es-ES': {
+    greeting: "¡Hola! Gracias por llamar. ¿En qué puedo ayudarle hoy?",
+    disclosure: "Por favor, tenga en cuenta que está hablando con un asistente de inteligencia artificial.",
+    afterHours: "Actualmente estamos cerrados. Por favor, deje un mensaje y nos pondremos en contacto con usted.",
+  },
+  'es-MX': {
+    greeting: "¡Hola! Gracias por llamar. ¿En qué le puedo ayudar hoy?",
+    disclosure: "Por favor, tenga en cuenta que está hablando con un asistente de inteligencia artificial.",
+    afterHours: "Estamos cerrados en este momento. Por favor, deje un mensaje y le responderemos pronto.",
+  },
+  'fr-FR': {
+    greeting: "Bonjour ! Merci d'avoir appelé. Comment puis-je vous aider aujourd'hui ?",
+    disclosure: "Veuillez noter que vous parlez avec un assistant IA.",
+    afterHours: "Nous sommes actuellement fermés. Veuillez laisser un message et nous vous recontacterons.",
+  },
+  'de-DE': {
+    greeting: "Hallo! Vielen Dank für Ihren Anruf. Wie kann ich Ihnen heute helfen?",
+    disclosure: "Bitte beachten Sie, dass Sie mit einem KI-Assistenten sprechen.",
+    afterHours: "Wir haben derzeit geschlossen. Bitte hinterlassen Sie eine Nachricht und wir melden uns bei Ihnen.",
+  },
+  'pt-BR': {
+    greeting: "Olá! Obrigado por ligar. Como posso ajudá-lo hoje?",
+    disclosure: "Por favor, note que você está falando com um assistente de IA.",
+    afterHours: "Estamos fechados no momento. Por favor, deixe uma mensagem e retornaremos em breve.",
+  },
+  'zh-CN': {
+    greeting: "您好！感谢您的来电。今天我能为您做些什么？",
+    disclosure: "请注意，您正在与AI助手交谈。",
+    afterHours: "我们目前已关闭。请留言，我们会尽快回复您。",
+  },
+  'ja-JP': {
+    greeting: "こんにちは！お電話ありがとうございます。本日はどのようなご用件でしょうか？",
+    disclosure: "AIアシスタントとお話しいただいていることをご了承ください。",
+    afterHours: "現在営業時間外です。メッセージを残していただければ、折り返しご連絡いたします。",
+  },
+  'ko-KR': {
+    greeting: "안녕하세요! 전화 주셔서 감사합니다. 오늘 무엇을 도와드릴까요?",
+    disclosure: "AI 어시스턴트와 대화하고 계심을 알려드립니다.",
+    afterHours: "현재 영업시간이 아닙니다. 메시지를 남겨주시면 연락드리겠습니다.",
+  },
+  'vi-VN': {
+    greeting: "Xin chào! Cảm ơn bạn đã gọi điện. Hôm nay tôi có thể giúp gì cho bạn?",
+    disclosure: "Xin lưu ý rằng bạn đang nói chuyện với trợ lý AI.",
+    afterHours: "Chúng tôi hiện đang đóng cửa. Vui lòng để lại tin nhắn và chúng tôi sẽ liên hệ lại với bạn.",
+  },
+};
 
 // Industry templates
 const templates: Record<string, { greeting: string; disclosure: string; systemPrompt: string }> = {
@@ -44,6 +113,7 @@ export default function AIReceptionist() {
   const [disclosure, setDisclosure] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
   const [afterHoursScript, setAfterHoursScript] = useState('');
+  const [language, setLanguage] = useState('en-US');
   const [allowedActions, setAllowedActions] = useState<AllowedActions>({
     faq: true,
     booking: true,
@@ -79,10 +149,21 @@ export default function AIReceptionist() {
       setDisclosure(data.disclosure_script || '');
       setSystemPrompt(data.system_prompt || '');
       setAfterHoursScript(data.after_hours_script || '');
+      setLanguage(data.language || 'en-US');
       const actions = data.allowed_actions_json as unknown as AllowedActions;
       if (actions) setAllowedActions(actions);
     }
     setIsLoading(false);
+  };
+
+  // Apply localized scripts when language changes
+  const applyLanguageDefaults = (langCode: string) => {
+    const scripts = LOCALIZED_SCRIPTS[langCode] || LOCALIZED_SCRIPTS['en-US'];
+    setGreeting(scripts.greeting);
+    setDisclosure(scripts.disclosure);
+    setAfterHoursScript(scripts.afterHours);
+    setLanguage(langCode);
+    toast.success(`Applied ${LANGUAGES.find(l => l.code === langCode)?.name || langCode} defaults`);
   };
 
   if (!currentCompany) {
@@ -100,6 +181,7 @@ export default function AIReceptionist() {
       system_prompt: systemPrompt,
       after_hours_script: afterHoursScript,
       allowed_actions_json: actionsAsJson,
+      language: language,
     };
 
     let error;
@@ -154,7 +236,7 @@ export default function AIReceptionist() {
           <h1 className="text-3xl font-display font-bold">AI Receptionist</h1>
           <p className="text-muted-foreground">Configure how your AI handles calls for {currentCompany.name}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap justify-end">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline">
@@ -172,6 +254,42 @@ export default function AIReceptionist() {
           </Button>
         </div>
       </div>
+
+      {/* Language Selection */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><Globe className="h-5 w-5" /> Language</CardTitle>
+          <CardDescription>Set the primary language for your AI receptionist</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-4">
+            <Select value={language} onValueChange={(val) => setLanguage(val)}>
+              <SelectTrigger className="w-64">
+                <SelectValue placeholder="Select language" />
+              </SelectTrigger>
+              <SelectContent>
+                {LANGUAGES.map((lang) => (
+                  <SelectItem key={lang.code} value={lang.code}>
+                    <span className="flex items-center gap-2">
+                      <span>{lang.flag}</span>
+                      <span>{lang.name}</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="outline" onClick={() => applyLanguageDefaults(language)}>
+              Apply Localized Defaults
+            </Button>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            This sets the language the AI will use to respond. Click "Apply Localized Defaults" to auto-fill greeting, disclosure, and after-hours scripts in the selected language.
+          </p>
+          <Button onClick={() => handleSave('Language')} disabled={isSaving} className="bg-accent hover:bg-accent/90">
+            {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />} Save Language
+          </Button>
+        </CardContent>
+      </Card>
 
       {/* Greeting & Disclosure */}
       <Card>
