@@ -7,6 +7,7 @@ import { CompanyHoursEditor } from '@/components/company/CompanyHoursEditor';
 import { CompanyStatsCards } from '@/components/company/CompanyStatsCards';
 import { TodaysCallsTable } from '@/components/company/TodaysCallsTable';
 import { QuickActions } from '@/components/company/QuickActions';
+import { OnboardingChecklist } from '@/components/onboarding/OnboardingChecklist';
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
@@ -102,6 +103,9 @@ export default function CompanyOverview() {
 
         {/* Overview Tab */}
         <TabsContent value="overview" className="space-y-6 mt-6">
+          {/* Onboarding Checklist - shows for new companies */}
+          <OnboardingChecklist companyId={currentCompany.id} />
+          
           {/* Stats - Company-scoped, operational only */}
           <CompanyStatsCards companyId={currentCompany.id} />
 
