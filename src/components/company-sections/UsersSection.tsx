@@ -119,19 +119,31 @@ export function UsersSection() {
 
       // Send invite email via edge function
       try {
-        const { error: emailError } = await supabase.functions.invoke('send-invite', {
+        const { data, error: emailError } = await supabase.functions.invoke('send-invite', {
           body: { invite_id: invite.id }
         });
         if (emailError) {
           console.warn('Failed to send invite email:', emailError);
+          return { emailSent: false, reason: 'error' };
         }
+        if (data?.skipped || data?.success === false) {
+          return { emailSent: false, reason: data?.error || 'Email not configured' };
+        }
+        return { emailSent: true };
       } catch (emailErr) {
         console.warn('Email send failed, but invite was created:', emailErr);
+        return { emailSent: false, reason: 'error' };
       }
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['company-invites'] });
-      toast.success('Invite created and email sent');
+      if (result?.emailSent) {
+        toast.success('Invite created and email sent');
+      } else {
+        toast.success('Invite created - copy the link to share it manually', {
+          description: 'Email sending requires a verified domain on Resend'
+        });
+      }
       setInviteOpen(false);
       setInviteEmail('');
       setInviteRole('company_staff');
