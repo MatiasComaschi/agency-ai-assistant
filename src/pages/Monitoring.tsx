@@ -8,13 +8,19 @@ import {
   PhoneForwarded, 
   TrendingUp, 
   RefreshCw,
-  Calendar
+  Calendar,
+  Mic,
+  Phone
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useCompany } from '@/contexts/CompanyContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { LiveCallMonitor } from '@/components/monitoring/LiveCallMonitor';
+import { CallRecordingsTable } from '@/components/calls/CallRecordingsTable';
 
 interface MetricsSummary {
   totalCalls: number;
@@ -44,6 +50,7 @@ interface CallMetric {
 
 export default function Monitoring() {
   const { currentCompany } = useCompany();
+  const { isAgencyAdmin } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [timeRange, setTimeRange] = useState('7d');
   const [metrics, setMetrics] = useState<MetricsSummary | null>(null);
@@ -159,7 +166,7 @@ export default function Monitoring() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-display font-bold">Monitoring</h1>
-          <p className="text-muted-foreground">Webhook metrics, errors, and performance</p>
+          <p className="text-muted-foreground">Real-time monitoring, metrics, and call recordings</p>
         </div>
         <div className="flex items-center gap-3">
           <Select value={timeRange} onValueChange={setTimeRange}>
@@ -179,133 +186,163 @@ export default function Monitoring() {
         </div>
       </div>
 
-      {/* Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Total Calls</CardTitle>
-            <Activity className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{metrics?.totalCalls || 0}</div>
-            <p className="text-xs text-muted-foreground">In selected period</p>
-          </CardContent>
-        </Card>
+      <Tabs defaultValue="live" className="w-full">
+        <TabsList className="grid w-full max-w-md grid-cols-3">
+          <TabsTrigger value="live" className="gap-2">
+            <Phone className="h-4 w-4" />
+            Live Calls
+          </TabsTrigger>
+          <TabsTrigger value="recordings" className="gap-2">
+            <Mic className="h-4 w-4" />
+            Recordings
+          </TabsTrigger>
+          <TabsTrigger value="metrics" className="gap-2">
+            <Activity className="h-4 w-4" />
+            Metrics
+          </TabsTrigger>
+        </TabsList>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Error Rate</CardTitle>
-            <AlertCircle className={`h-4 w-4 ${(metrics?.errorRate || 0) > 5 ? 'text-destructive' : 'text-muted-foreground'}`} />
-          </CardHeader>
-          <CardContent>
-            <div className={`text-2xl font-bold ${(metrics?.errorRate || 0) > 5 ? 'text-destructive' : ''}`}>
-              {metrics?.errorRate || 0}%
-            </div>
-            <p className="text-xs text-muted-foreground">{metrics?.errorCount || 0} webhook errors</p>
-          </CardContent>
-        </Card>
+        {/* Live Calls Tab */}
+        <TabsContent value="live" className="mt-6">
+          <LiveCallMonitor companyId={isAgencyAdmin ? undefined : currentCompany.id} />
+        </TabsContent>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Avg Latency</CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className={`text-2xl font-bold ${(metrics?.avgLatencyMs || 0) > 1000 ? 'text-warning' : ''}`}>
-              {metrics?.avgLatencyMs || 0}ms
-            </div>
-            <p className="text-xs text-muted-foreground">Webhook response time</p>
-          </CardContent>
-        </Card>
+        {/* Recordings Tab */}
+        <TabsContent value="recordings" className="mt-6">
+          <CallRecordingsTable companyId={currentCompany.id} />
+        </TabsContent>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Escalation Rate</CardTitle>
-            <PhoneForwarded className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{metrics?.escalationRate || 0}%</div>
-            <p className="text-xs text-muted-foreground">{metrics?.escalationCount || 0} escalated calls</p>
-          </CardContent>
-        </Card>
-      </div>
+        {/* Metrics Tab */}
+        <TabsContent value="metrics" className="mt-6 space-y-6">
+          {/* Key Metrics */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium">Total Calls</CardTitle>
+                <Activity className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{metrics?.totalCalls || 0}</div>
+                <p className="text-xs text-muted-foreground">In selected period</p>
+              </CardContent>
+            </Card>
 
-      {/* Cost Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <DollarSign className="h-5 w-5 text-primary" />
-              <CardTitle>Cost Summary</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex justify-between items-center">
-              <span className="text-muted-foreground">Total Cost</span>
-              <span className="text-2xl font-bold">${((metrics?.totalCostCents || 0) / 100).toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-muted-foreground">Avg per Call</span>
-              <span className="font-medium">${((metrics?.avgCostPerCall || 0) / 100).toFixed(2)}</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <TrendingUp className="h-5 w-5 text-primary" />
-              <CardTitle>Call Outcomes</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {Object.entries(callsByOutcome).map(([outcome, count]) => (
-                <div key={outcome} className="flex justify-between items-center">
-                  <span className="text-sm capitalize">{outcome.replace('_', ' ')}</span>
-                  <span className="font-medium">{count}</span>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium">Error Rate</CardTitle>
+                <AlertCircle className={`h-4 w-4 ${(metrics?.errorRate || 0) > 5 ? 'text-destructive' : 'text-muted-foreground'}`} />
+              </CardHeader>
+              <CardContent>
+                <div className={`text-2xl font-bold ${(metrics?.errorRate || 0) > 5 ? 'text-destructive' : ''}`}>
+                  {metrics?.errorRate || 0}%
                 </div>
-              ))}
-              {Object.keys(callsByOutcome).length === 0 && (
-                <p className="text-sm text-muted-foreground">No calls in this period</p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+                <p className="text-xs text-muted-foreground">{metrics?.errorCount || 0} webhook errors</p>
+              </CardContent>
+            </Card>
 
-      {/* Recent Errors */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <AlertCircle className="h-5 w-5 text-destructive" />
-            <CardTitle>Recent Errors</CardTitle>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium">Avg Latency</CardTitle>
+                <Clock className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className={`text-2xl font-bold ${(metrics?.avgLatencyMs || 0) > 1000 ? 'text-warning' : ''}`}>
+                  {metrics?.avgLatencyMs || 0}ms
+                </div>
+                <p className="text-xs text-muted-foreground">Webhook response time</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium">Escalation Rate</CardTitle>
+                <PhoneForwarded className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{metrics?.escalationRate || 0}%</div>
+                <p className="text-xs text-muted-foreground">{metrics?.escalationCount || 0} escalated calls</p>
+              </CardContent>
+            </Card>
           </div>
-          <CardDescription>Last 10 webhook errors in selected period</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {recentErrors.length > 0 ? (
-            <div className="space-y-3">
-              {recentErrors.map((error, i) => (
-                <div key={i} className="border rounded-lg p-3 space-y-1">
-                  <div className="flex justify-between items-start">
-                    <code className="text-sm font-medium">{error.endpoint}</code>
-                    <span className="text-xs text-muted-foreground">
-                      {new Date(error.created_at).toLocaleString()}
-                    </span>
-                  </div>
-                  {error.error_message && (
-                    <p className="text-sm text-destructive">{error.error_message}</p>
-                  )}
-                  <p className="text-xs text-muted-foreground">Latency: {error.latency_ms}ms</p>
+
+          {/* Cost Metrics */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <DollarSign className="h-5 w-5 text-primary" />
+                  <CardTitle>Cost Summary</CardTitle>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">No errors in this period 🎉</p>
-          )}
-        </CardContent>
-      </Card>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">Total Cost</span>
+                  <span className="text-2xl font-bold">${((metrics?.totalCostCents || 0) / 100).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">Avg per Call</span>
+                  <span className="font-medium">${((metrics?.avgCostPerCall || 0) / 100).toFixed(2)}</span>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5 text-primary" />
+                  <CardTitle>Call Outcomes</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {Object.entries(callsByOutcome).map(([outcome, count]) => (
+                    <div key={outcome} className="flex justify-between items-center">
+                      <span className="text-sm capitalize">{outcome.replace('_', ' ')}</span>
+                      <span className="font-medium">{count}</span>
+                    </div>
+                  ))}
+                  {Object.keys(callsByOutcome).length === 0 && (
+                    <p className="text-sm text-muted-foreground">No calls in this period</p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Recent Errors */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-destructive" />
+                <CardTitle>Recent Errors</CardTitle>
+              </div>
+              <CardDescription>Last 10 webhook errors in selected period</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {recentErrors.length > 0 ? (
+                <div className="space-y-3">
+                  {recentErrors.map((error, i) => (
+                    <div key={i} className="border rounded-lg p-3 space-y-1">
+                      <div className="flex justify-between items-start">
+                        <code className="text-sm font-medium">{error.endpoint}</code>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(error.created_at).toLocaleString()}
+                        </span>
+                      </div>
+                      {error.error_message && (
+                        <p className="text-sm text-destructive">{error.error_message}</p>
+                      )}
+                      <p className="text-xs text-muted-foreground">Latency: {error.latency_ms}ms</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">No errors in this period 🎉</p>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </motion.div>
   );
 }

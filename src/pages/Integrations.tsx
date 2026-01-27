@@ -8,11 +8,14 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Separator } from '@/components/ui/separator';
 import { useCompany } from '@/contexts/CompanyContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { formatDistanceToNow } from 'date-fns';
 import TwilioSettings from '@/components/integrations/TwilioSettings';
+import { ProvisionedNumbersTable } from '@/components/phone/ProvisionedNumbersTable';
 
 import type { Json } from '@/integrations/supabase/types';
 
@@ -103,6 +106,7 @@ const providers: ProviderConfig[] = [
 
 export default function Integrations() {
   const { currentCompany, refetchCompanies } = useCompany();
+  const { isAgencyAdmin } = useAuth();
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [loading, setLoading] = useState(true);
   const [connectDialogOpen, setConnectDialogOpen] = useState(false);
@@ -283,6 +287,14 @@ export default function Integrations() {
         <h1 className="text-3xl font-display font-bold">Integrations</h1>
         <p className="text-muted-foreground">Connect your favorite tools for {currentCompany.name}</p>
       </div>
+
+      {/* Agency Admin: Provisioned Numbers Overview */}
+      {isAgencyAdmin && (
+        <>
+          <ProvisionedNumbersTable />
+          <Separator className="my-6" />
+        </>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-12">
