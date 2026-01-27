@@ -44,6 +44,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Loader2, Plus, Pencil, Trash2, Users, Clock, Calendar, Settings2 } from 'lucide-react';
 import { StaffHoursEditor } from '@/components/staff/StaffHoursEditor';
 import { StaffTimeOffManager } from '@/components/staff/StaffTimeOffManager';
+import { CompanySelector } from '@/components/company/CompanySelector';
 
 interface Staff {
   id: string;
@@ -333,6 +334,9 @@ export default function StaffPage() {
 
   return (
     <div className="space-y-6">
+      {/* Company Selector */}
+      <CompanySelector />
+
       {/* Dev Debug Readout */}
       {process.env.NODE_ENV === 'development' && (
         <div className="text-xs font-mono bg-muted/50 px-3 py-1 rounded border border-dashed border-muted-foreground/30 text-muted-foreground">

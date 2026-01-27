@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
+import { CompanySelector } from '@/components/company/CompanySelector';
 import type { KnowledgeBaseItem } from '@/types';
 
 export default function KnowledgeBase() {
@@ -210,6 +211,9 @@ export default function KnowledgeBase() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+      {/* Company Selector */}
+      <CompanySelector />
+
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-display font-bold">Knowledge Base</h1>
