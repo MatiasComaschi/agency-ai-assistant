@@ -1,14 +1,16 @@
-import { useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Navigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Bot, Loader2, Mail, Lock, User } from 'lucide-react';
+import { Bot, Loader2, Mail, Lock, User, UserPlus } from 'lucide-react';
 import { z } from 'zod';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { toast } from 'sonner';
 
 const loginSchema = z.object({
@@ -22,10 +24,21 @@ const signupSchema = z.object({
   password: z.string().min(6, 'Password must be at least 6 characters'),
 });
 
+interface InviteDetails {
+  token: string;
+  email: string;
+  role: string;
+  companyId: string;
+  companyName: string;
+}
+
 export default function Auth() {
   const { user, isLoading, signIn, signUp } = useAuth();
+  const [searchParams] = useSearchParams();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [inviteDetails, setInviteDetails] = useState<InviteDetails | null>(null);
+  const [isLoadingInvite, setIsLoadingInvite] = useState(false);
 
   // Login form state
   const [loginEmail, setLoginEmail] = useState('');
@@ -36,10 +49,105 @@ export default function Auth() {
   const [signupEmail, setSignupEmail] = useState('');
   const [signupPassword, setSignupPassword] = useState('');
 
-  if (isLoading) {
+  // Check for invite token in URL
+  useEffect(() => {
+    const inviteToken = searchParams.get('invite');
+    if (inviteToken) {
+      fetchInviteDetails(inviteToken);
+    }
+  }, [searchParams]);
+
+  const fetchInviteDetails = async (token: string) => {
+    setIsLoadingInvite(true);
+    try {
+      const { data, error } = await supabase
+        .from('company_invites')
+        .select('token, email, role, company_id, companies(name)')
+        .eq('token', token)
+        .is('accepted_at', null)
+        .gt('expires_at', new Date().toISOString())
+        .single();
+
+      if (error || !data) {
+        toast.error('Invalid or expired invite link');
+        return;
+      }
+
+      const companyData = data.companies as unknown as { name: string } | null;
+      
+      setInviteDetails({
+        token: data.token,
+        email: data.email,
+        role: data.role,
+        companyId: data.company_id,
+        companyName: companyData?.name || 'Unknown Company',
+      });
+
+      // Pre-fill email
+      setSignupEmail(data.email);
+      setLoginEmail(data.email);
+    } catch (err) {
+      console.error('Error fetching invite:', err);
+      toast.error('Failed to load invite details');
+    } finally {
+      setIsLoadingInvite(false);
+    }
+  };
+
+  // Accept invite and create membership
+  const acceptInvite = async (userId: string) => {
+    if (!inviteDetails) return;
+
+    try {
+      // Create membership
+      const { error: membershipError } = await supabase.from('memberships').insert({
+        user_id: userId,
+        company_id: inviteDetails.companyId,
+        role: inviteDetails.role,
+      });
+
+      if (membershipError) {
+        // Check if already a member
+        if (membershipError.code === '23505') {
+          console.log('User is already a member of this company');
+        } else {
+          throw membershipError;
+        }
+      }
+
+      // Mark invite as accepted
+      await supabase
+        .from('company_invites')
+        .update({ accepted_at: new Date().toISOString() })
+        .eq('token', inviteDetails.token);
+
+      toast.success(`Welcome to ${inviteDetails.companyName}!`);
+    } catch (err) {
+      console.error('Error accepting invite:', err);
+      toast.error('Failed to accept invite');
+    }
+  };
+
+  if (isLoading || isLoadingInvite) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  // If user is logged in and there's an invite, accept it
+  if (user && inviteDetails) {
+    acceptInvite(user.id).then(() => {
+      // Redirect after accepting
+      window.location.href = '/company';
+    });
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-4" />
+          <p className="text-muted-foreground">Accepting invite...</p>
+        </div>
       </div>
     );
   }
@@ -76,6 +184,7 @@ export default function Auth() {
       }
     } else {
       toast.success('Welcome back!');
+      // If there's an invite, it will be handled in the effect above
     }
   };
 
@@ -131,8 +240,20 @@ export default function Auth() {
           <p className="text-muted-foreground mt-1">Intelligent call handling for local businesses</p>
         </div>
 
+        {/* Invite Banner */}
+        {inviteDetails && (
+          <Alert className="mb-4 border-primary/20 bg-primary/5">
+            <UserPlus className="h-4 w-4" />
+            <AlertDescription>
+              You've been invited to join <strong>{inviteDetails.companyName}</strong> as a{' '}
+              <strong>{inviteDetails.role === 'company_owner' ? 'Owner' : 'Staff Member'}</strong>.
+              Sign in or create an account to accept.
+            </AlertDescription>
+          </Alert>
+        )}
+
         <Card className="shadow-lg border-border/50">
-          <Tabs defaultValue="login" className="w-full">
+          <Tabs defaultValue={inviteDetails ? 'signup' : 'login'} className="w-full">
             <CardHeader className="pb-4">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="login">Sign In</TabsTrigger>
@@ -183,7 +304,7 @@ export default function Auth() {
                     {isSubmitting ? (
                       <Loader2 className="h-4 w-4 animate-spin mr-2" />
                     ) : null}
-                    Sign In
+                    {inviteDetails ? 'Sign In & Accept Invite' : 'Sign In'}
                   </Button>
                 </form>
               </TabsContent>
@@ -219,6 +340,7 @@ export default function Auth() {
                         value={signupEmail}
                         onChange={(e) => setSignupEmail(e.target.value)}
                         className="pl-10"
+                        disabled={!!inviteDetails}
                       />
                     </div>
                     {errors.email && (
@@ -248,7 +370,7 @@ export default function Auth() {
                     {isSubmitting ? (
                       <Loader2 className="h-4 w-4 animate-spin mr-2" />
                     ) : null}
-                    Create Account
+                    {inviteDetails ? 'Create Account & Join Team' : 'Create Account'}
                   </Button>
                 </form>
               </TabsContent>
