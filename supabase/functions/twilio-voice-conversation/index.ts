@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.2";
+import { formatCompanyHoursForAI } from "../_shared/format-hours.ts";
 
 // CORS headers for preflight
 const corsHeaders = {
@@ -477,10 +478,10 @@ Deno.serve(async (req) => {
     const escalateUrl = `${functionsBase}/twilio-voice-escalate?call_id=${encodeURIComponent(callId || callSid)}&company_id=${encodeURIComponent(companyId)}`;
     const nextTurnUrl = `${functionsBase}/twilio-voice-conversation?call_id=${encodeURIComponent(callId || callSid)}&company_id=${encodeURIComponent(companyId)}&turn=${turnCount + 1}`;
 
-    // Fetch company and AI profile
+    // Fetch company, AI profile, and business hours
     const { data: company } = await supabase
       .from("companies")
-      .select("id, name, fallback_phone, booking_link, industry")
+      .select("id, name, fallback_phone, booking_link, industry, timezone")
       .eq("id", companyId)
       .single();
 
@@ -489,6 +490,17 @@ Deno.serve(async (req) => {
       .select("*")
       .eq("company_id", companyId)
       .single();
+
+    // Fetch company hours for AI context
+    const { data: companyHours } = await supabase
+      .from("company_hours")
+      .select("day_of_week, open_time, close_time, is_closed")
+      .eq("company_id", companyId)
+      .order("day_of_week");
+
+    // Format business hours for AI context
+    const companyTimezone = company?.timezone || "America/New_York";
+    const businessHoursText = formatCompanyHoursForAI(companyHours || [], companyTimezone);
 
     const escalationRules = (aiProfile?.escalation_rules_json as Record<string, unknown>) || {
       escalateOnRequest: true,
@@ -1376,7 +1388,7 @@ Deno.serve(async (req) => {
 - Offer to take a message or create a callback request if they need to speak to someone.`
           : "";
 
-        // Assemble final prompt: CORE PROMPT (locked) + Company Prompt + KB
+        // Assemble final prompt: CORE PROMPT (locked) + Company Prompt + Hours + KB
         const companyPrompt = aiProfile?.system_prompt || "Be helpful and warm.";
         
         const systemPrompt = `${corePrompt}
@@ -1386,6 +1398,8 @@ Deno.serve(async (req) => {
 You are a friendly phone receptionist for ${company?.name || "the company"}.
 
 ${companyPrompt}
+
+${businessHoursText}
 
 ADDITIONAL RULES:
 1. Keep responses to 1-2 sentences max

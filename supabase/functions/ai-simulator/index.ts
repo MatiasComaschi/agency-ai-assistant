@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.91.0";
-
+import { formatCompanyHoursForAI } from "../_shared/format-hours.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -42,6 +42,24 @@ serve(async (req) => {
       console.error("Error fetching AI profile:", profileError);
     }
 
+    // Fetch company data for timezone
+    const { data: company } = await supabase
+      .from("companies")
+      .select("timezone")
+      .eq("id", companyId)
+      .single();
+
+    // Fetch company's business hours
+    const { data: companyHours } = await supabase
+      .from("company_hours")
+      .select("day_of_week, open_time, close_time, is_closed")
+      .eq("company_id", companyId)
+      .order("day_of_week");
+
+    // Format business hours for AI context
+    const companyTimezone = company?.timezone || "America/New_York";
+    const businessHoursText = formatCompanyHoursForAI(companyHours || [], companyTimezone);
+
     // Fetch company's knowledge base items
     const { data: kbItems, error: kbError } = await supabase
       .from("knowledge_base_items")
@@ -79,6 +97,8 @@ CALLER INFORMATION:
 - Name: ${callerName || "Unknown"}
 - Phone: ${callerPhone || "Unknown"}
 - Intent Mode: ${mode.toUpperCase()}
+
+${businessHoursText}
 
 ALLOWED ACTIONS:
 ${allowedActions.faq ? "- Answer FAQs from knowledge base" : "- FAQs: NOT ALLOWED"}
