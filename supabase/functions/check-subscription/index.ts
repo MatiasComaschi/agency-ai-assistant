@@ -1,5 +1,6 @@
 import Stripe from "https://esm.sh/stripe@18.5.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.2";
+import { PLANS, getPlanByProductId } from "../_shared/plans.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,29 +10,6 @@ const corsHeaders = {
 const logStep = (step: string, details?: unknown) => {
   const detailsStr = details ? ` - ${JSON.stringify(details)}` : "";
   console.log(`[CHECK-SUBSCRIPTION] ${step}${detailsStr}`);
-};
-
-// Plan configuration
-const PLANS = {
-  starter: {
-    price_id: "price_1SsnhMLryYhQFO41SQFCtH75",
-    product_id: "prod_TqUgkXRzuK5EVD",
-    calls_limit: 100,
-    minutes_limit: 200,
-  },
-  pro: {
-    price_id: "price_1SsnjALryYhQFO417GLGRrto",
-    product_id: "prod_TqUiYhiyfcZ7AL",
-    calls_limit: 300,
-    minutes_limit: 600,
-  },
-};
-
-const getPlanKeyFromProductId = (productId: string): string | null => {
-  for (const [key, plan] of Object.entries(PLANS)) {
-    if (plan.product_id === productId) return key;
-  }
-  return null;
 };
 
 Deno.serve(async (req) => {
@@ -155,7 +133,7 @@ Deno.serve(async (req) => {
     const subscriptionEnd = new Date(matchingSubscription.current_period_end * 1000).toISOString();
     const subscriptionStart = new Date(matchingSubscription.current_period_start * 1000).toISOString();
     const productId = matchingSubscription.items.data[0].price.product as string;
-    const planKey = getPlanKeyFromProductId(productId) || "starter";
+    const planKey = getPlanByProductId(productId) || "starter";
     const planConfig = PLANS[planKey as keyof typeof PLANS] || PLANS.starter;
 
     logStep("Active subscription found", { 

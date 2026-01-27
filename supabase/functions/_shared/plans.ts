@@ -1,5 +1,5 @@
-// Centralized billing plan configuration - single source of truth
-// This matches supabase/functions/_shared/plans.ts for consistency
+// Centralized plan configuration - single source of truth
+// Used by: create-checkout, check-subscription, stripe-webhook, frontend
 
 export const PLANS = {
   starter: {
@@ -43,21 +43,6 @@ export type Plan = typeof PLANS[PlanKey];
 // Overage rate: $0.15 per minute
 export const OVERAGE_RATE_CENTS = 15;
 
-export const calculateOverage = (
-  minutesUsed: number,
-  minutesIncluded: number
-): number => {
-  const overageMinutes = Math.max(0, minutesUsed - minutesIncluded);
-  return overageMinutes * OVERAGE_RATE_CENTS;
-};
-
-export const formatCurrency = (cents: number): string => {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-  }).format(cents / 100);
-};
-
 export const getPlanByProductId = (productId: string): PlanKey | null => {
   for (const [key, plan] of Object.entries(PLANS)) {
     if (plan.product_id === productId) return key as PlanKey;
@@ -70,4 +55,12 @@ export const getPlanByPriceId = (priceId: string): PlanKey | null => {
     if (plan.price_id === priceId) return key as PlanKey;
   }
   return null;
+};
+
+export const calculateOverage = (
+  minutesUsed: number,
+  minutesIncluded: number
+): number => {
+  const overageMinutes = Math.max(0, minutesUsed - minutesIncluded);
+  return overageMinutes * OVERAGE_RATE_CENTS;
 };

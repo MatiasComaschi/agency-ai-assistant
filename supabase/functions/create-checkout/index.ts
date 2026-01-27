@@ -1,5 +1,6 @@
 import Stripe from "https://esm.sh/stripe@18.5.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.2";
+import { PLANS } from "../_shared/plans.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,22 +10,6 @@ const corsHeaders = {
 const logStep = (step: string, details?: unknown) => {
   const detailsStr = details ? ` - ${JSON.stringify(details)}` : "";
   console.log(`[CREATE-CHECKOUT] ${step}${detailsStr}`);
-};
-
-// Plan configuration
-const PLANS = {
-  starter: {
-    price_id: "price_1SsnhMLryYhQFO41SQFCtH75",
-    product_id: "prod_TqUgkXRzuK5EVD",
-    calls_limit: 100,
-    minutes_limit: 200,
-  },
-  pro: {
-    price_id: "price_1SsnjALryYhQFO417GLGRrto",
-    product_id: "prod_TqUiYhiyfcZ7AL",
-    calls_limit: 300,
-    minutes_limit: 600,
-  },
 };
 
 Deno.serve(async (req) => {
