@@ -32,14 +32,17 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { useState } from 'react';
 
-const navItems = [
-  { label: 'Agency Dashboard', icon: LayoutDashboard, path: '/agency', adminOnly: true },
-  { label: 'Templates', icon: FileText, path: '/agency/templates', adminOnly: true },
-  { label: 'Bulk Import', icon: Upload, path: '/agency/bulk-import', adminOnly: true },
-  { label: 'Support Console', icon: Headphones, path: '/agency/support', adminOnly: true },
-  { label: 'Audit Log', icon: History, path: '/agency/audit-log', adminOnly: true },
-  { label: 'Platform Settings', icon: Code, path: '/agency/platform', adminOnly: true },
-  { label: 'Admin Settings', icon: Shield, path: '/agency/admin-settings', adminOnly: true },
+const agencyItems = [
+  { label: 'Agency Dashboard', icon: LayoutDashboard, path: '/agency' },
+  { label: 'Templates', icon: FileText, path: '/agency/templates' },
+  { label: 'Bulk Import', icon: Upload, path: '/agency/bulk-import' },
+  { label: 'Support Console', icon: Headphones, path: '/agency/support' },
+  { label: 'Audit Log', icon: History, path: '/agency/audit-log' },
+  { label: 'Platform Settings', icon: Code, path: '/agency/platform' },
+  { label: 'Admin Settings', icon: Shield, path: '/agency/admin-settings' },
+];
+
+const companyItems = [
   { label: 'Company Overview', icon: Building2, path: '/company' },
   { label: 'AI Receptionist', icon: Bot, path: '/ai-receptionist' },
   { label: 'Knowledge Base', icon: BookOpen, path: '/knowledge-base' },
@@ -50,11 +53,6 @@ const navItems = [
   { label: 'Team', icon: Users, path: '/team' },
   { label: 'Integrations', icon: Puzzle, path: '/integrations' },
   { label: 'Billing', icon: CreditCard, path: '/billing' },
-  { label: 'Monitoring', icon: Activity, path: '/monitoring' },
-  { label: 'ROI Report', icon: TrendingUp, path: '/roi-report' },
-  { label: 'Referrals', icon: Gift, path: '/referrals' },
-  { label: 'Testimonials', icon: MessageSquare, path: '/testimonials' },
-  { label: 'White Label', icon: Palette, path: '/white-label' },
   { label: 'Settings', icon: Settings, path: '/settings' },
 ];
 
@@ -63,9 +61,10 @@ export function Sidebar() {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
 
-  const filteredItems = navItems.filter(
-    (item) => !item.adminOnly || isAgencyAdmin
-  );
+  // Show agency items only for admins, always show company items
+  const filteredItems = isAgencyAdmin 
+    ? [...agencyItems, ...companyItems]
+    : companyItems;
 
   return (
     <motion.aside

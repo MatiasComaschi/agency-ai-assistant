@@ -43,6 +43,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Loader2, Plus, CalendarCheck, XCircle, Search } from 'lucide-react';
 import { format, parseISO, addMinutes } from 'date-fns';
 import { AvailabilityTester } from '@/components/appointments/AvailabilityTester';
+import { CompanySelector } from '@/components/company/CompanySelector';
 
 interface Appointment {
   id: string;
@@ -269,6 +270,9 @@ export default function Appointments() {
 
   return (
     <div className="space-y-6">
+      {/* Company Selector */}
+      <CompanySelector />
+
       {/* Dev Debug Readout */}
       {process.env.NODE_ENV === 'development' && (
         <div className="text-xs font-mono bg-muted/50 px-3 py-1 rounded border border-dashed border-muted-foreground/30 text-muted-foreground">

@@ -9,6 +9,7 @@ import Auth from "@/pages/Auth";
 import AgencyDashboard from "@/pages/AgencyDashboard";
 import CreateCompany from "@/pages/CreateCompany";
 import CompanyOverview from "@/pages/CompanyOverview";
+import CompanySettings from "@/pages/CompanySettings";
 import AIReceptionist from "@/pages/AIReceptionist";
 import KnowledgeBase from "@/pages/KnowledgeBase";
 import CallLogs from "@/pages/CallLogs";
@@ -47,6 +48,7 @@ const App = () => (
               <Route index element={<Navigate to="/agency" replace />} />
               <Route path="agency" element={<AgencyDashboard />} />
               <Route path="agency/create-company" element={<CreateCompany />} />
+              <Route path="agency/company-settings" element={<CompanySettings />} />
               <Route path="agency/templates" element={<IndustryTemplates />} />
               <Route path="agency/bulk-import" element={<BulkImport />} />
               <Route path="agency/support" element={<SupportConsole />} />

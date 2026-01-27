@@ -35,6 +35,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Plus, Pencil, Trash2, Package } from 'lucide-react';
+import { CompanySelector } from '@/components/company/CompanySelector';
 
 interface Service {
   id: string;
@@ -247,6 +248,9 @@ export default function Services() {
 
   return (
     <div className="space-y-6">
+      {/* Company Selector */}
+      <CompanySelector />
+
       {/* Dev Debug Readout */}
       {process.env.NODE_ENV === 'development' && (
         <div className="text-xs font-mono bg-muted/50 px-3 py-1 rounded border border-dashed border-muted-foreground/30 text-muted-foreground">

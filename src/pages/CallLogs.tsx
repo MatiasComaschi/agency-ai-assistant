@@ -15,6 +15,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
+import { CompanySelector } from '@/components/company/CompanySelector';
 import type { Call, FollowupTask } from '@/types';
 
 const outcomeColors: Record<string, string> = {
@@ -143,6 +144,9 @@ export default function CallLogs() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+      {/* Company Selector */}
+      <CompanySelector />
+
       <div>
         <h1 className="text-3xl font-display font-bold">Call Logs</h1>
         <p className="text-muted-foreground">View and manage call history</p>

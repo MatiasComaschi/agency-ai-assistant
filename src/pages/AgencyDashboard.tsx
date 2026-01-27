@@ -13,6 +13,8 @@ import {
   Building2,
   Play,
   Loader2,
+  Settings,
+  Phone,
 } from 'lucide-react';
 import { DebugIdsDialog } from '@/components/debug/DebugIdsDialog';
 import { useAuth } from '@/contexts/AuthContext';
@@ -361,7 +363,7 @@ export default function AgencyDashboard() {
               </TableHeader>
               <TableBody>
                 {filteredCompanies.map((company) => (
-                  <TableRow key={company.id} className="group cursor-pointer" onClick={() => handleView(company)}>
+                  <TableRow key={company.id} className="group">
                     <TableCell>
                       <div className="font-medium">{company.name}</div>
                     </TableCell>
@@ -382,25 +384,31 @@ export default function AgencyDashboard() {
                     <TableCell className="text-muted-foreground">
                       {new Date(company.created_at).toLocaleDateString()}
                     </TableCell>
-                    <TableCell onClick={(e) => e.stopPropagation()}>
+                    <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="opacity-0 group-hover:opacity-100 transition-opacity"
                           >
                             <MoreHorizontal className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
+                        <DropdownMenuContent align="end" className="bg-popover">
+                          <DropdownMenuItem onClick={() => navigate(`/agency/company-settings?id=${company.id}`)}>
+                            <Settings className="h-4 w-4 mr-2" />
+                            Open Settings
+                          </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => handleView(company)}>
                             <Eye className="h-4 w-4 mr-2" />
-                            View
+                            View Overview
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => openEditModal(company)}>
-                            <Pencil className="h-4 w-4 mr-2" />
-                            Edit
+                          <DropdownMenuItem onClick={() => {
+                            setCurrentCompanyId(company.id);
+                            navigate('/calls');
+                          }}>
+                            <Phone className="h-4 w-4 mr-2" />
+                            View Calls
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           {company.status === 'active' ? (

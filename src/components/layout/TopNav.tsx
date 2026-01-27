@@ -35,7 +35,7 @@ export function TopNav() {
             <ChevronDown className="h-4 w-4 text-muted-foreground" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-64">
+        <DropdownMenuContent align="start" className="w-64 bg-popover">
           {companies.map((company) => (
             <DropdownMenuItem
               key={company.id}
