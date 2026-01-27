@@ -662,7 +662,7 @@ Deno.serve(async (req) => {
 
     // Voice gateway WebSocket URL with authentication token
     const voiceGatewayToken = "vgw_9f3c2a7b1d4e6f8a0c2d4e6f8a1b3c5d";
-    const voiceGatewayUrl = `wss://assistant-production-ef06.up.railway.app/twilio?company_id=${companyIdForUrls}&token=${voiceGatewayToken}`;
+    const voiceGatewayUrl = `wss://shimmering-caring-production.up.railway.app/twilio?company_id=${companyIdForUrls}&token=${voiceGatewayToken}`;
 
     // Build TwiML: Greeting → Disclosure → Connect to WebSocket Stream → Fallback Record
     let twimlBody = "";
