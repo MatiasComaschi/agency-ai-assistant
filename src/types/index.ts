@@ -26,6 +26,7 @@ export interface Company {
   fallback_phone: string | null;
   booking_link: string | null;
   twilio_number: string | null;
+  ai_enabled: boolean;
   created_at: string;
   updated_at: string;
 }

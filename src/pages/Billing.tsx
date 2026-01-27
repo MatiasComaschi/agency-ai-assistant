@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Check, CreditCard, Download, RefreshCw, Zap, AlertCircle, ExternalLink } from "lucide-react";
+import { Check, CreditCard, Download, RefreshCw, Zap, AlertCircle, ExternalLink, ShieldAlert } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useCompany } from "@/contexts/CompanyContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { useSubscription } from "@/hooks/useSubscription";
 import { PLANS, PlanKey, formatCurrency, calculateOverage, OVERAGE_RATE_CENTS } from "@/lib/billing";
 import { toast } from "sonner";
@@ -15,6 +16,7 @@ import { useSearchParams } from "react-router-dom";
 
 export default function Billing() {
   const { currentCompany } = useCompany();
+  const { isAgencyAdmin } = useAuth();
   const [searchParams] = useSearchParams();
   const {
     subscription,
@@ -77,6 +79,93 @@ export default function Billing() {
     : 0;
 
   const estimatedOverage = calculateOverage(usage.minutesCount, subscription.minutesLimit);
+
+  // Non-agency admins see limited billing info
+  if (!isAgencyAdmin) {
+    return (
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-display font-bold">Subscription</h1>
+          <p className="text-muted-foreground">Your plan details for {currentCompany.name}</p>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CreditCard className="h-5 w-5" />
+              Current Plan
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {subscription.isLoading ? (
+              <Skeleton className="h-8 w-32" />
+            ) : subscription.subscribed ? (
+              <div className="flex items-center gap-3">
+                <Badge variant="secondary" className="text-lg px-4 py-1">
+                  {subscription.plan === 'pro' ? 'Pro' : 'Starter'}
+                </Badge>
+                <Badge variant="outline">Active</Badge>
+              </div>
+            ) : (
+              <Alert>
+                <ShieldAlert className="h-4 w-4" />
+                <AlertDescription>
+                  No active subscription. Contact your administrator.
+                </AlertDescription>
+              </Alert>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Usage only - no pricing */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Current Usage</CardTitle>
+            <CardDescription>This billing period</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {usage.isLoading || subscription.isLoading ? (
+              <div className="space-y-4">
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+              </div>
+            ) : subscription.subscribed ? (
+              <>
+                <div>
+                  <div className="flex justify-between text-sm mb-2">
+                    <span>Calls Used</span>
+                    <span className="font-medium">
+                      {usage.callsCount} / {subscription.callsLimit}
+                    </span>
+                  </div>
+                  <Progress 
+                    value={callsUsedPercent} 
+                    className={`h-2 ${callsUsedPercent >= 90 ? "[&>div]:bg-destructive" : ""}`} 
+                  />
+                </div>
+                <div>
+                  <div className="flex justify-between text-sm mb-2">
+                    <span>Minutes Used</span>
+                    <span className="font-medium">
+                      {usage.minutesCount} / {subscription.minutesLimit}
+                    </span>
+                  </div>
+                  <Progress 
+                    value={minutesUsedPercent} 
+                    className={`h-2 ${minutesUsedPercent >= 90 ? "[&>div]:bg-destructive" : ""}`}
+                  />
+                </div>
+              </>
+            ) : (
+              <p className="text-muted-foreground text-center py-4">
+                Subscribe to a plan to track usage
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">

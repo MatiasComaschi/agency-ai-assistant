@@ -52,8 +52,8 @@ interface CallWithCompany extends Call {
   sentiment?: string;
 }
 
-interface CompanyWithAI extends Company {
-  ai_enabled?: boolean;
+interface CompanyWithAI extends Omit<Company, 'ai_enabled'> {
+  ai_enabled: boolean;
 }
 
 export default function SupportConsole() {
