@@ -247,6 +247,13 @@ export default function Services() {
 
   return (
     <div className="space-y-6">
+      {/* Dev Debug Readout */}
+      {process.env.NODE_ENV === 'development' && (
+        <div className="text-xs font-mono bg-muted/50 px-3 py-1 rounded border border-dashed border-muted-foreground/30 text-muted-foreground">
+          Current company: <span className="text-foreground font-semibold">{currentCompany.id}</span>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-display font-bold text-foreground">Services</h1>
